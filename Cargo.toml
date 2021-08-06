@@ -1,0 +1,25 @@
+[package]
+name = "raf"
+version = "0.1.0"
+authors = ["Paolo Galeone <nessuno@nerdz.eu>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+#telexide = "0.1.6"
+telexide = { git = "https://github.com/galeone/telexide", branch = "master" }
+rusqlite = { version = "0.25", features = ["chrono"] }
+r2d2_sqlite = "0.18"
+r2d2 = "0.8.9"
+tokio = { version = "1.8.0", features = ["full"] }
+chrono = "0.4.19"
+typemap = "0.3.3"
+url = "2.2.2"
+log = "0.4.14"
+simple_logger = "1.11.0"
+hyper = "0.14.10"
+hyper-tls = "0.5.0"
+data-encoding = "2.3.2"
+regex = "1.5.4"
+default = "0.1.2"
