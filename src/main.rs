@@ -59,7 +59,7 @@ struct Campaign {
     chan: i64,
 }
 
-async fn send_main_commands_message(context: Context, message: &Message) {
+async fn send_main_commands_message(context: &Context, message: &Message) {
     let text = escape_markdown(
         "What do you want to do?\n\
         /register - Register a channel to the bot\n\
@@ -74,7 +74,6 @@ async fn send_main_commands_message(context: Context, message: &Message) {
         let err = res.err().unwrap();
         error!("[help] error: {}", err);
     }
-
 }
 
 #[command(description = "Help menu")]
@@ -365,7 +364,7 @@ fn get_channels(context: &Context, message: &Message) -> Vec<Channel> {
     let map = guard.get::<HashMapKey>().expect("hashmap");
     let conn = map.get().unwrap();
     let mut stmt = conn
-        .prepare("SELECT id, link, name FROM channels WHERE registered_by = ? ORDER BY id DESC")
+        .prepare("SELECT id, link, name FROM channels WHERE registered_by = ? ORDER BY id ASC")
         .unwrap();
 
     let user_id = message.from.clone().unwrap().id;
@@ -442,19 +441,40 @@ async fn list(context: Context, message: Message) -> CommandResult {
         let err = res.err().unwrap();
         error!("[list channels] error: {}", err);
     }
-    send_main_commands_message(context, &message).await;
+    send_main_commands_message(&context, &message).await;
 
     info!("list command exit");
     Ok(())
 }
 
-async fn display_manage_menu(context: &Context, message: &Message, chan_id: i64) {
-    let mut reply = SendMessage::new(message.chat.get_id(), "What do you want to do?");
+async fn delete_parent_message(context: &Context, message: &Message, parent_message: Option<i64>) {
+    if let Some(parent_id) = parent_message {
+        let res = context
+            .api
+            .delete_message(DeleteMessage::new(message.chat.get_id(), parent_id))
+            .await;
+
+        if res.is_err() {
+            let err = res.err().unwrap();
+            error!("[delete parent message] {}", err);
+        }
+    }
+}
+
+async fn display_manage_menu(context: &Context, message: &Message, chan: &Channel) {
+    let mut reply = SendMessage::new(
+        message.chat.get_id(),
+        &escape_markdown(
+            &format!("Campaign for {}\nWhat do you want to do?", chan.name),
+            None,
+        ),
+    );
     reply.set_parse_mode(&ParseMode::MarkdownV2);
+    let chan_id = chan.id;
     let inline_keyboard = vec![
         vec![
             InlineKeyboardButton {
-                text: "Create".to_owned(),
+                text: "✍️ Create".to_owned(),
                 // start, chan
                 callback_data: Some(format!("create {}", chan_id)),
                 callback_game: None,
@@ -465,7 +485,7 @@ async fn display_manage_menu(context: &Context, message: &Message, chan_id: i64)
                 url: None,
             },
             InlineKeyboardButton {
-                text: "Delete".to_owned(),
+                text: "❌ Delete".to_owned(),
                 callback_data: Some(format!("delete {}", chan_id)),
                 callback_game: None,
                 login_url: None,
@@ -477,7 +497,7 @@ async fn display_manage_menu(context: &Context, message: &Message, chan_id: i64)
         ],
         vec![
             InlineKeyboardButton {
-                text: "Start".to_owned(),
+                text: "▶️ Start".to_owned(),
                 // start, chan
                 callback_data: Some(format!("start {}", chan_id)),
                 callback_game: None,
@@ -488,7 +508,7 @@ async fn display_manage_menu(context: &Context, message: &Message, chan_id: i64)
                 url: None,
             },
             InlineKeyboardButton {
-                text: "Stop".to_owned(),
+                text: "⏹ Stop".to_owned(),
                 callback_data: Some(format!("stop {}", chan_id)),
                 callback_game: None,
                 login_url: None,
@@ -498,16 +518,28 @@ async fn display_manage_menu(context: &Context, message: &Message, chan_id: i64)
                 url: None,
             },
         ],
-        vec![InlineKeyboardButton {
-            text: "List".to_owned(),
-            callback_data: Some(format!("list {}", chan_id)),
-            callback_game: None,
-            login_url: None,
-            pay: None,
-            switch_inline_query: None,
-            switch_inline_query_current_chat: None,
-            url: None,
-        }],
+        vec![
+            InlineKeyboardButton {
+                text: "📄List".to_owned(),
+                callback_data: Some(format!("list {}", chan_id)),
+                callback_game: None,
+                login_url: None,
+                pay: None,
+                switch_inline_query: None,
+                switch_inline_query_current_chat: None,
+                url: None,
+            },
+            InlineKeyboardButton {
+                text: "🔙Menu".to_owned(),
+                callback_data: Some(format!("main {}", chan_id)),
+                callback_game: None,
+                login_url: None,
+                pay: None,
+                switch_inline_query: None,
+                switch_inline_query_current_chat: None,
+                url: None,
+            },
+        ],
     ];
     reply.set_parse_mode(&ParseMode::MarkdownV2);
     reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
@@ -528,7 +560,11 @@ async fn remove_loading_icon(context: &Context, callback_id: &str, text: Option<
             callback_query_id: callback_id.to_string(),
             cache_time: None,
             show_alert: text.is_some(),
-            text: if text.is_some() { Some(text.unwrap().to_string()) } else {None},
+            text: if text.is_some() {
+                Some(text.unwrap().to_string())
+            } else {
+                None
+            },
             url: None,
         })
         .await;
@@ -544,6 +580,8 @@ async fn callback_handler(context: Context, update: Update) {
         UpdateContent::CallbackQuery(ref q) => q,
         _ => return,
     };
+    let parent_message = callback.message.as_ref().map(|message| message.message_id);
+
     let data = callback.data.clone().unwrap_or_else(|| "".to_string());
     let mut source: i64 = 0;
     let mut dest: i64 = 0;
@@ -554,6 +592,8 @@ async fn callback_handler(context: Context, update: Update) {
     // Manage commands
     let (mut create, mut delete, mut stop, mut start, mut list) =
         (false, false, false, false, false);
+    // Back to main menu
+    let mut main = false;
     // Delete Campaign commands
     let mut delete_campaign = false;
     let mut campaign_id = 0;
@@ -586,6 +626,11 @@ async fn callback_handler(context: Context, update: Update) {
         iter.next(); // manage
         chan_id = iter.next().unwrap().parse().unwrap();
         manage = true;
+    } else if data.starts_with("main") {
+        let mut iter = data.split_ascii_whitespace();
+        iter.next(); // main
+        chan_id = iter.next().unwrap().parse().unwrap();
+        main = true;
     } else if data.starts_with("create") {
         let mut iter = data.split_ascii_whitespace();
         iter.next(); // delete
@@ -641,6 +686,12 @@ async fn callback_handler(context: Context, update: Update) {
 
     let message = callback.message.clone().unwrap();
     let user = callback.from.id;
+
+    if main {
+        delete_parent_message(&context, &message, parent_message).await;
+        send_main_commands_message(&context, &message).await;
+        return;
+    }
 
     let chan = {
         let guard = context.data.read();
@@ -783,21 +834,22 @@ async fn callback_handler(context: Context, update: Update) {
 
     if manage {
         remove_loading_icon(&context, &callback.id, None).await;
-        display_manage_menu(&context, &message, chan.id).await;
+        display_manage_menu(&context, &message, &chan).await;
+        delete_parent_message(&context, &message, parent_message).await;
     }
 
     if start {
         // TODO
         remove_loading_icon(&context, &callback.id, None).await;
-        display_manage_menu(&context, &message, chan.id).await;
+        display_manage_menu(&context, &message, &chan).await;
+        delete_parent_message(&context, &message, parent_message).await;
     }
 
     if stop {
         // TODO
-
         remove_loading_icon(&context, &callback.id, None).await;
-        display_manage_menu(&context, &message, chan.id).await;
-
+        display_manage_menu(&context, &message, &chan).await;
+        delete_parent_message(&context, &message, parent_message).await;
     }
 
     if create {
@@ -843,12 +895,18 @@ async fn callback_handler(context: Context, update: Update) {
         }
 
         remove_loading_icon(&context, &callback.id, None).await;
+        delete_parent_message(&context, &message, parent_message).await;
     }
 
     if delete {
         let campaigns = get_campaigns(&context, chan.id);
         if campaigns.is_empty() {
-            remove_loading_icon(&context, &callback.id, Some("You have no campaigns to delete!")).await;
+            remove_loading_icon(
+                &context,
+                &callback.id,
+                Some("You have no campaigns to delete!"),
+            )
+            .await;
         } else {
             let mut reply = SendMessage::new(
                 message.chat.get_id(),
@@ -891,6 +949,7 @@ async fn callback_handler(context: Context, update: Update) {
                 error!("[create send] error: {}", err);
             }
             remove_loading_icon(&context, &callback.id, None).await;
+            delete_parent_message(&context, &message, parent_message).await;
         };
     }
 
@@ -933,9 +992,16 @@ async fn callback_handler(context: Context, update: Update) {
                 error!("[list campaigns] error: {}", err);
             }
             remove_loading_icon(&context, &callback.id, None).await;
-            display_manage_menu(&context, &message, chan.id).await;
+
+            display_manage_menu(&context, &message, &chan).await;
+            delete_parent_message(&context, &message, parent_message).await;
         } else {
-            remove_loading_icon(&context, &callback.id, Some("You don't have any active or past campaigns for this channel!")).await;
+            remove_loading_icon(
+                &context,
+                &callback.id,
+                Some("You don't have any active or past campaigns for this channel!"),
+            )
+            .await;
         }
     }
 
@@ -956,10 +1022,7 @@ async fn callback_handler(context: Context, update: Update) {
         };
         let res = context
             .api
-            .send_message(SendMessage::new(
-                message.chat.get_id(),
-                &text
-            ))
+            .send_message(SendMessage::new(message.chat.get_id(), &text))
             .await;
         if res.is_err() {
             let err = res.err().unwrap();
@@ -967,18 +1030,45 @@ async fn callback_handler(context: Context, update: Update) {
         }
 
         remove_loading_icon(&context, &callback.id, None).await;
-        display_manage_menu(&context, &message, chan.id).await;
+        display_manage_menu(&context, &message, &chan).await;
+        delete_parent_message(&context, &message, parent_message).await;
     }
 }
 
-fn campagin_from_text(text: &str, chan: i64) -> Option<Campaign> {
+#[derive(Debug, Clone)]
+enum CampaignError {
+    ParseError(chrono::format::ParseError),
+    GenericError(String),
+}
+
+impl From<chrono::format::ParseError> for CampaignError {
+    fn from(error: chrono::format::ParseError) -> CampaignError {
+        CampaignError::ParseError(error)
+    }
+}
+
+impl From<String> for CampaignError {
+    fn from(error: String) -> CampaignError {
+        CampaignError::GenericError(error)
+    }
+}
+
+impl std::fmt::Display for CampaignError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            CampaignError::ParseError(error) => write!(f, "DateTime parse error: {}", error),
+            CampaignError::GenericError(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+fn campaign_from_text(text: &str, chan: i64) -> Result<Campaign, CampaignError> {
     let rows = text
         .split('\n')
         .skip_while(|r| r.is_empty())
         .collect::<Vec<&str>>();
     if rows.len() != 4 {
-        error!("failed because row.len() != 4. Got: {}", rows.len());
-        return None;
+        return Err(format!("failed because row.len() != 4. Got: {}", rows.len()).into());
     }
     let id = -1;
     let name = rows[0].to_string();
@@ -999,23 +1089,21 @@ fn campagin_from_text(text: &str, chan: i64) -> Option<Campaign> {
         elements[1] += ":00";
         elements.join(" ")
     };
-    let start = DateTime::parse_from_str(&add_seconds(rows[1]), "%Y-%m-%d %H:%M:%S %#z");
-    if start.is_err() {
-        info!(
-            "failed because start.is_err: {}: {}",
-            start.unwrap_err(),
-            add_seconds(rows[1])
-        );
-        return None;
+    let start: DateTime<chrono::Utc> =
+        DateTime::parse_from_str(&add_seconds(rows[1]), "%Y-%m-%d %H:%M:%S %#z")?.into();
+    let now = chrono::Utc::now();
+    if start < now {
+        return Err("Start date can't be in the past".to_string().into());
     }
-    let start: DateTime<chrono::Utc> = start.unwrap().into();
-    let end = DateTime::parse_from_str(&add_seconds(rows[2]), "%Y-%m-%d %H:%M:%S %#z");
-    if end.is_err() {
-        info!("failed because end.is_err: {}", end.unwrap_err());
-        return None;
+    let end: DateTime<chrono::Utc> =
+        DateTime::parse_from_str(&add_seconds(rows[2]), "%Y-%m-%d %H:%M:%S %#z")?.into();
+    if end < now {
+        return Err("End date can't be in the past".to_string().into());
     }
-    let end: DateTime<chrono::Utc> = end.unwrap().into();
-    Some(Campaign {
+    if end < start {
+        return Err("End date can't be before the start date".to_string().into());
+    }
+    Ok(Campaign {
         id,
         start,
         end,
@@ -1196,7 +1284,7 @@ async fn message_handler(context: Context, update: Update) {
             let err = res.err().unwrap();
             error!("[message handler] final send message error: {}", err);
         }
-        send_main_commands_message(context, message).await;
+        send_main_commands_message(&context, message).await;
     } else {
         // If we are not in the registartion flow, we just received a message
         // and we should check if the message is among the accepted ones.
@@ -1224,7 +1312,9 @@ async fn message_handler(context: Context, update: Update) {
             // only once.
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT chan FROM being_managed_channels WHERE chan IN ({})",
+                    "SELECT channels.id, channels.link, channels.name, channels.registered_by FROM \
+                    channels INNER JOIN being_managed_channels \
+                    WHERE being_managed_channels.chan IN ({})",
                     channels
                         .iter()
                         .map(|c| c.id.to_string())
@@ -1234,7 +1324,12 @@ async fn message_handler(context: Context, update: Update) {
                 .unwrap();
             let chan = stmt
                 .query_map(params![], |row| {
-                    Ok(BeingManagedChannel { chan: row.get(0)? })
+                    Ok(Channel {
+                        id: row.get(0)?,
+                        link: row.get(1)?,
+                        name: row.get(2)?,
+                        registered_by: row.get(3)?,
+                    })
                 })
                 .unwrap()
                 .map(|chan| chan.unwrap())
@@ -1242,28 +1337,28 @@ async fn message_handler(context: Context, update: Update) {
             chan
         };
         if chan.is_some() {
-            let chan = chan.unwrap().chan;
-            let campagin = campagin_from_text(&text, chan);
+            let chan = chan.unwrap();
+            let campaign = campaign_from_text(&text, chan.id);
 
-            if let Some(campagin) = campagin {
+            if let Ok(campaign) = campaign {
                 let res = {
                     let guard = context.data.read();
                     let map = guard.get::<HashMapKey>().expect("hashmap");
                     let conn = map.get().unwrap();
                     conn.execute(
                         "INSERT INTO campaigns(name, start, end, prize, chan)  VALUES(?, ?, ?, ?, ?)",
-                        params![campagin.name, campagin.start, campagin.end, campagin.prize, campagin.chan]
+                        params![campaign.name, campaign.start, campaign.end, campaign.prize, campaign.chan]
                     )
                 };
                 if res.is_err() {
                     let err = res.err().unwrap();
-                    error!("[insert campagin] error: {}", err);
+                    error!("[insert campaign] error: {}", err);
                 } else {
                     let res = context
                         .api
                         .send_message(SendMessage::new(
                             message.chat.get_id(),
-                            &format!("Campaing {} created succesfully!", campagin.name),
+                            &format!("Campaing {} created succesfully!", campaign.name),
                         ))
                         .await;
 
@@ -1273,12 +1368,14 @@ async fn message_handler(context: Context, update: Update) {
                     }
                 }
             } else {
+                let err = campaign.unwrap_err();
                 let res = context
                     .api
                     .send_message(SendMessage::new(
                         message.chat.get_id(),
-                        "Something wrong happened while creating your new campagin.\n\n\
-                        Please restart the campagin creating process and send a correct message (check the time zone format!)",
+                        &format!("Something wrong happened while creating your new campaign.\n\n\
+                        Error: {}\n\n\
+                        Please restart the campaign creating process and send a correct message (check the time zone format!)", err),
                     ))
                     .await;
 
@@ -1287,7 +1384,7 @@ async fn message_handler(context: Context, update: Update) {
                     error!("[message handler] campaing ok send error: {}", err);
                 }
             }
-            // Delete from the currently managing campagins, since creating is completed
+            // Delete from the currently managing campaigns, since creating is completed
             let res = {
                 let guard = context.data.read();
                 let map = guard.get::<HashMapKey>().expect("hashmap");
@@ -1295,13 +1392,13 @@ async fn message_handler(context: Context, update: Update) {
                 let mut stmt = conn
                     .prepare("DELETE FROM being_managed_channels WHERE chan = ?")
                     .unwrap();
-                stmt.execute(params![chan])
+                stmt.execute(params![chan.id])
             };
             if res.is_err() {
                 error!("delete from being_managed_channels: {}", res.unwrap_err());
             }
 
-            display_manage_menu(&context, &message, chan).await;
+            display_manage_menu(&context, &message, &chan).await;
         }
         // else, if no channel is being edited, ignore and move on
     }
