@@ -1,4 +1,4 @@
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
@@ -22,6 +22,8 @@ use simple_logger::SimpleLogger;
 
 use tabular::{Row, Table};
 
+use tokio::time::{sleep, Duration};
+
 #[derive(Debug)]
 struct User {
     id: i64,
@@ -43,7 +45,7 @@ struct BeingManagedChannel {
 #[derive(Debug)]
 struct Invite {
     id: i64,
-    date: DateTime<chrono::Utc>,
+    date: DateTime<Utc>,
     source: i64,
     dest: i64,
     chan: i64,
@@ -54,8 +56,9 @@ struct Campaign {
     id: i64,
     name: String,
     prize: String,
-    start: DateTime<chrono::Utc>,
-    end: DateTime<chrono::Utc>,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    started_at: Option<DateTime<Utc>>,
     chan: i64,
 }
 
@@ -105,44 +108,52 @@ async fn campaign(context: Context, message: Message) -> CommandResult {
     info!("campaign command begin");
     let channels = get_channels(&context, &message);
 
-    let mut reply = SendMessage::new(
-        message.chat.get_id(),
-        "Select the channel you want to manage",
-    );
+    if channels.is_empty() {
+        let reply = SendMessage::new(message.chat.get_id(), "You have no registered channels!");
+        let res = context.api.send_message(reply).await;
+        if res.is_err() {
+            let err = res.err().unwrap();
+            error!("[list channels] error: {}", err);
+        }
+        send_main_commands_message(&context, &message).await;
+    } else {
+        let mut reply = SendMessage::new(
+            message.chat.get_id(),
+            "Select the channel you want to manage",
+        );
 
-    let mut partition_size: usize = channels.len() / 2;
-    if partition_size < 2 {
-        partition_size = 1;
-    }
-    let inline_keyboard: Vec<Vec<InlineKeyboardButton>> = channels
-        .chunks(partition_size)
-        .map(|chunk| {
-            chunk
-                .iter()
-                .map(|channel| InlineKeyboardButton {
-                    text: channel.name.clone(),
-                    // manage, channel id
-                    callback_data: Some(format!("manage {}", channel.id)),
-                    callback_game: None,
-                    login_url: None,
-                    pay: None,
-                    switch_inline_query: None,
-                    switch_inline_query_current_chat: None,
-                    url: None,
-                })
-                .collect()
-        })
-        .collect();
-    reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
-        inline_keyboard,
-    }));
-    reply.set_parse_mode(&ParseMode::MarkdownV2);
-
-    let res = context.api.send_message(reply).await;
-
-    if res.is_err() {
-        let err = res.err().unwrap();
-        error!("[list channels] error: {}", err);
+        let mut partition_size: usize = channels.len() / 2;
+        if partition_size < 2 {
+            partition_size = 1;
+        }
+        let inline_keyboard: Vec<Vec<InlineKeyboardButton>> = channels
+            .chunks(partition_size)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .map(|channel| InlineKeyboardButton {
+                        text: channel.name.clone(),
+                        // manage, channel id
+                        callback_data: Some(format!("manage {}", channel.id)),
+                        callback_game: None,
+                        login_url: None,
+                        pay: None,
+                        switch_inline_query: None,
+                        switch_inline_query_current_chat: None,
+                        url: None,
+                    })
+                    .collect()
+            })
+            .collect();
+        reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
+            inline_keyboard,
+        }));
+        reply.set_parse_mode(&ParseMode::MarkdownV2);
+        let res = context.api.send_message(reply).await;
+        if res.is_err() {
+            let err = res.err().unwrap();
+            error!("[list channels] error: {}", err);
+        }
     }
 
     info!("campaign command end");
@@ -161,7 +172,7 @@ async fn start(context: Context, message: Message) -> CommandResult {
     // On start, save the user ID if not already present
     let res = {
         let guard = context.data.read();
-        let map = guard.get::<HashMapKey>().expect("hashmap");
+        let map = guard.get::<DBKey>().expect("db");
         let conn = map.get().unwrap();
         let user = message.from.clone().unwrap();
         conn.execute(
@@ -181,8 +192,11 @@ async fn start(context: Context, message: Message) -> CommandResult {
             .await?;
     }
 
-    // /start?base64encode(source=<uid>&chan=<chan id>)
+    // ?start=base64encode(source=<uid>&chan=<chan id>)
     // message = "start base64encode(source=ecc)"
+    // source AND chan == invitation
+    // chan ALONE = sent by the bot inside the chan, we have to generate the referring link
+    // (encode with source = current user and this chan) that he can use to share the invite
     let text = message.get_text().unwrap();
     info!("Start text: {}", text);
     let mut split = text.split_ascii_whitespace();
@@ -203,19 +217,15 @@ async fn start(context: Context, message: Message) -> CommandResult {
         } else {
             -1
         };
+        let campaign_id = if params.contains_key("campaign") {
+            params["campaign"].parse::<i64>().unwrap_or(-1)
+        } else {
+            -1
+        };
 
-        if -1 == source || -1 == chan {
-            context
-                .api
-                .send_message(SendMessage::new(
-                    message.chat.get_id(),
-                    "Invalid /start command parameters.",
-                ))
-                .await?;
-        }
-        let (user, channel) = {
+        let (user, channel, c) = {
             let guard = context.data.read();
-            let map = guard.get::<HashMapKey>().expect("hashmap");
+            let map = guard.get::<DBKey>().expect("db");
             let conn = map.get().unwrap();
             let mut stmt = conn
                 .prepare("SELECT link, name, registered_by FROM channels WHERE id = ?")
@@ -233,33 +243,44 @@ async fn start(context: Context, message: Message) -> CommandResult {
                 .unwrap()
                 .map(|chan| chan.unwrap())
                 .next();
-            if channel.is_none() {
-                (None, None)
-            } else {
-                let channel = channel.unwrap();
 
-                let mut stmt = conn.prepare("SELECT name FROM users WHERE id = ?").unwrap();
-
-                let user = stmt
-                    .query_map(params![source], |row| {
-                        Ok(User {
-                            id: source,
-                            name: row.get(0)?,
-                        })
+            let mut stmt = conn.prepare("SELECT name FROM users WHERE id = ?").unwrap();
+            let user = stmt
+                .query_map(params![source], |row| {
+                    Ok(User {
+                        id: source,
+                        name: row.get(0)?,
                     })
-                    .unwrap()
-                    .map(|user| user.unwrap())
-                    .next();
-                if user.is_none() {
-                    (None, None)
-                } else {
-                    let user = user.unwrap();
-                    (Some(user), Some(channel))
-                }
-            }
+                })
+                .unwrap()
+                .map(|user| user.unwrap())
+                .next();
+
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name, prize, start, end, started_at, chan FROM campaigns WHERE id = ?",
+                )
+                .unwrap();
+            let c = stmt
+                .query_map(params![campaign_id], |row| {
+                    Ok(Campaign {
+                        id: campaign_id,
+                        name: row.get(0)?,
+                        prize: row.get(1)?,
+                        start: row.get(2)?,
+                        end: row.get(3)?,
+                        started_at: row.get(4)?,
+                        chan: row.get(5)?,
+                    })
+                })
+                .unwrap()
+                .map(|c| c.unwrap())
+                .next();
+            (user, channel, c)
         };
 
-        if user.is_none() || channel.is_none() {
+        // Error
+        if user.is_none() && channel.is_none() {
             context
                 .api
                 .send_message(SendMessage::new(
@@ -271,48 +292,92 @@ async fn start(context: Context, message: Message) -> CommandResult {
             return Err(CommandError(
                 "Something wrong with the channel or the user that's inviting you".to_owned(),
             ));
+            // Invite
+        } else if user.is_some() && channel.is_some() {
+            let user = user.unwrap();
+            let channel = channel.unwrap();
+
+            let mut reply = SendMessage::new(
+                message.chat.get_id(),
+                &format!("{} invited you to join {}", user.name, channel.name),
+            );
+
+            let inline_keyboard = vec![vec![
+                InlineKeyboardButton {
+                    text: "Accept ✅".to_owned(),
+                    // tick, source, dest, chan
+                    callback_data: Some(format!(
+                        "✅ {} {} {}",
+                        user.id,
+                        message.from.clone().unwrap().id,
+                        channel.id
+                    )),
+                    callback_game: None,
+                    login_url: None,
+                    pay: None,
+                    switch_inline_query: None,
+                    switch_inline_query_current_chat: None,
+                    url: None,
+                },
+                InlineKeyboardButton {
+                    text: "Refuse ❌".to_owned(),
+                    callback_data: Some("❌".to_string()),
+                    callback_game: None,
+                    login_url: None,
+                    pay: None,
+                    switch_inline_query: None,
+                    switch_inline_query_current_chat: None,
+                    url: None,
+                },
+            ]];
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+            reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
+                inline_keyboard,
+            }));
+            context.api.send_message(reply).await?;
+
+        // Bot generated url: generate invite url for current user
+        } else if user.is_none() && channel.is_some() && c.is_some() {
+            let chan = channel.unwrap();
+            let c = c.unwrap();
+            let bot_name = {
+                let guard = context.data.read();
+                guard
+                    .get::<NameKey>()
+                    .expect("name")
+                    .clone()
+                    .replace('@', "")
+            };
+            let params = BASE64URL.encode(
+                format!(
+                    "chan={}&campaign={}&source={}",
+                    chan.id,
+                    c.id,
+                    message.from.unwrap().id
+                )
+                .as_bytes(),
+            );
+            let invite_link = format!(
+                "https://t.me/{bot_name}?start={params}",
+                bot_name = bot_name,
+                params = params
+            );
+
+            let text = &escape_markdown(
+                &format!(
+                    "Thank you for joining the {campaign_name} challenge!\n\
+            Here's the link to use for inviting your friends to join {chan_name}:\n\n\
+            👉🏻{invite_link}",
+                    campaign_name = c.name,
+                    chan_name = chan.name,
+                    invite_link = invite_link
+                ),
+                None,
+            );
+            let mut reply = SendMessage::new(message.chat.get_id(), text);
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+            context.api.send_message(reply).await?;
         }
-        let user = user.unwrap();
-        let channel = channel.unwrap();
-
-        let mut reply = SendMessage::new(
-            message.chat.get_id(),
-            &format!("{} invited you to join {}", user.name, channel.name),
-        );
-
-        let inline_keyboard = vec![vec![
-            InlineKeyboardButton {
-                text: "Accept ✅".to_owned(),
-                // tick, source, dest, chan
-                callback_data: Some(format!(
-                    "✅ {} {} {}",
-                    user.id,
-                    message.from.clone().unwrap().id,
-                    channel.id
-                )),
-                callback_game: None,
-                login_url: None,
-                pay: None,
-                switch_inline_query: None,
-                switch_inline_query_current_chat: None,
-                url: None,
-            },
-            InlineKeyboardButton {
-                text: "Refuse ❌".to_owned(),
-                callback_data: Some("❌".to_string()),
-                callback_game: None,
-                login_url: None,
-                pay: None,
-                switch_inline_query: None,
-                switch_inline_query_current_chat: None,
-                url: None,
-            },
-        ]];
-        reply.set_parse_mode(&ParseMode::MarkdownV2);
-        reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
-            inline_keyboard,
-        }));
-        context.api.send_message(reply).await?;
     } else {
         // Case in which no parameter are present
         context
@@ -361,7 +426,7 @@ fn escape_markdown(text: &str, entity_type: Option<&str>) -> String {
 
 fn get_channels(context: &Context, message: &Message) -> Vec<Channel> {
     let guard = context.data.read();
-    let map = guard.get::<HashMapKey>().expect("hashmap");
+    let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
     let mut stmt = conn
         .prepare("SELECT id, link, name FROM channels WHERE registered_by = ? ORDER BY id ASC")
@@ -385,11 +450,11 @@ fn get_channels(context: &Context, message: &Message) -> Vec<Channel> {
 
 fn get_campaigns(context: &Context, chan: i64) -> Vec<Campaign> {
     let guard = context.data.read();
-    let map = guard.get::<HashMapKey>().expect("hashmap");
+    let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, prize, start, end FROM campaigns WHERE chan = ? ORDER BY end DESC",
+            "SELECT id, name, prize, start, end, started_at FROM campaigns WHERE chan = ? ORDER BY end DESC",
         )
         .unwrap();
 
@@ -401,6 +466,7 @@ fn get_campaigns(context: &Context, chan: i64) -> Vec<Campaign> {
                 prize: row.get(2)?,
                 start: row.get(3)?,
                 end: row.get(4)?,
+                started_at: row.get(5)?,
                 chan,
             })
         })
@@ -594,8 +660,8 @@ async fn callback_handler(context: Context, update: Update) {
         (false, false, false, false, false);
     // Back to main menu
     let mut main = false;
-    // Delete Campaign commands
-    let mut delete_campaign = false;
+    // Start/Delete Campaign commands
+    let (mut start_campaign, mut delete_campaign) = (false, false);
     let mut campaign_id = 0;
     if data.contains('✅') {
         let mut iter = data.split_ascii_whitespace();
@@ -603,6 +669,7 @@ async fn callback_handler(context: Context, update: Update) {
         source = iter.next().unwrap().parse().unwrap(); // source user
         dest = iter.next().unwrap().parse().unwrap(); // dest user
         chan_id = iter.next().unwrap().parse().unwrap(); // channel id
+        campaign_id = iter.next().unwrap().parse().unwrap(); // campaign id
         accepted = true;
     } else if data.contains('❌') {
         // Rejected invitation
@@ -642,6 +709,12 @@ async fn callback_handler(context: Context, update: Update) {
         chan_id = iter.next().unwrap().parse().unwrap();
         campaign_id = iter.next().unwrap().parse().unwrap();
         delete_campaign = true;
+    } else if data.starts_with("start_campaign") {
+        let mut iter = data.split_ascii_whitespace();
+        iter.next(); // start
+        chan_id = iter.next().unwrap().parse().unwrap();
+        campaign_id = iter.next().unwrap().parse().unwrap();
+        start_campaign = true;
     } else if data.starts_with("delete") {
         let mut iter = data.split_ascii_whitespace();
         iter.next(); // delete
@@ -658,13 +731,11 @@ async fn callback_handler(context: Context, update: Update) {
         iter.next(); // start
         chan_id = iter.next().unwrap().parse().unwrap();
         start = true;
-        // TODO
     } else if data.starts_with("list") {
         let mut iter = data.split_ascii_whitespace();
         iter.next(); // start
         chan_id = iter.next().unwrap().parse().unwrap();
         list = true;
-        // TODO
     } else {
         // Anyway, on no-sense command reply with the empty message
         // to remove the loading icon next to the button
@@ -695,7 +766,7 @@ async fn callback_handler(context: Context, update: Update) {
 
     let chan = {
         let guard = context.data.read();
-        let map = guard.get::<HashMapKey>().expect("hashmap");
+        let map = guard.get::<DBKey>().expect("db");
         let conn = map.get().unwrap();
 
         let mut stmt = conn
@@ -778,7 +849,7 @@ async fn callback_handler(context: Context, update: Update) {
             error!("[please join] error: {}", err);
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        sleep(Duration::from_secs(10)).await;
         let member = context
             .api
             .get_chat_member(GetChatMember {
@@ -794,11 +865,11 @@ async fn callback_handler(context: Context, update: Update) {
             info!("Refer OK!");
             let res = {
                 let guard = context.data.read();
-                let map = guard.get::<HashMapKey>().expect("hashmap");
+                let map = guard.get::<DBKey>().expect("db");
                 let conn = map.get().unwrap();
                 conn.execute(
-                    "INSERT INTO invitations(source, dest, chan) VALUES(?, ?, ?)",
-                    params![source, dest, chan.id],
+                    "INSERT INTO invitations(source, dest, chan, campaign) VALUES(?, ?, ?, ?)",
+                    params![source, dest, chan.id, campaign_id],
                 )
             };
             if res.is_err() {
@@ -830,6 +901,7 @@ async fn callback_handler(context: Context, update: Update) {
                 error!("[help] error: {}", err);
             }
         }
+        delete_parent_message(&context, &message, parent_message).await;
     }
 
     if manage {
@@ -839,10 +911,58 @@ async fn callback_handler(context: Context, update: Update) {
     }
 
     if start {
-        // TODO
-        remove_loading_icon(&context, &callback.id, None).await;
-        display_manage_menu(&context, &message, &chan).await;
-        delete_parent_message(&context, &message, parent_message).await;
+        let campaigns = get_campaigns(&context, chan.id);
+        if campaigns.is_empty() {
+            remove_loading_icon(
+                &context,
+                &callback.id,
+                Some("You have no campaigns to start!"),
+            )
+            .await;
+        } else {
+            let mut reply = SendMessage::new(
+                message.chat.get_id(),
+                &escape_markdown("Select the campaign to start", None),
+            );
+            let mut partition_size: usize = campaigns.len() / 2;
+            if partition_size < 2 {
+                partition_size = 1;
+            }
+            let inline_keyboard: Vec<Vec<InlineKeyboardButton>> = campaigns
+                .chunks(partition_size)
+                .map(|chunk| {
+                    chunk
+                        .iter()
+                        .map(|campaign| InlineKeyboardButton {
+                            text: campaign.name.clone(),
+                            // delete_campaign, channel id, campaign id
+                            callback_data: Some(format!(
+                                "start_campaign {} {}",
+                                chan.id, campaign.id
+                            )),
+                            callback_game: None,
+                            login_url: None,
+                            pay: None,
+                            switch_inline_query: None,
+                            switch_inline_query_current_chat: None,
+                            url: None,
+                        })
+                        .collect()
+                })
+                .collect();
+            reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
+                inline_keyboard,
+            }));
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+
+            let res = context.api.send_message(reply).await;
+            if res.is_err() {
+                let err = res.err().unwrap();
+                error!("[start send] error: {}", err);
+            }
+            remove_loading_icon(&context, &callback.id, None).await;
+            delete_parent_message(&context, &message, parent_message).await;
+        };
     }
 
     if stop {
@@ -853,19 +973,25 @@ async fn callback_handler(context: Context, update: Update) {
     }
 
     if create {
+        let now: DateTime<Utc> = Utc::now();
         let mut reply = SendMessage::new(
             message.chat.get_id(),
             &escape_markdown(
-                "Write a single message with every required info on a new line\n\n\
+                &format!(
+                    "Write a single message with every required info on a new line\n\n\
                 Campagin name\n\
                 Start date (YYYY-MM-DD hh:mm TZ)\n\
                 End date (YYY-MM-DD hh:mm TZ)\n\
                 Prize\n\n\
                 For example a valid message is (note the GMT+1 timezone written as +01):\n\n\
-                August\n\
-                2021-08-01 13:00 +01\n\
-                2021-08-31 20:00 +01\n\
+                {month_string}\n\
+                {year}-{month}-01 13:00 +01\n\
+                {year}-{month}-28 20:00 +01\n\
                 Amazon 50€ Gift Card\n",
+                    year = now.format("%Y"),
+                    month = now.format("%m"),
+                    month_string = now.format("%B")
+                ),
                 None,
             ),
         );
@@ -881,7 +1007,7 @@ async fn callback_handler(context: Context, update: Update) {
         // reply falls outiside this FSM
         let res = {
             let guard = context.data.read();
-            let map = guard.get::<HashMapKey>().expect("hashmap");
+            let map = guard.get::<DBKey>().expect("db");
             let conn = map.get().unwrap();
             conn.execute(
                 "INSERT INTO being_managed_channels(chan) VALUES(?)",
@@ -923,7 +1049,7 @@ async fn callback_handler(context: Context, update: Update) {
                         .iter()
                         .map(|campaign| InlineKeyboardButton {
                             text: campaign.name.clone(),
-                            // delete_campaing, channel id, campaing id
+                            // delete_campaign, channel id, campaign id
                             callback_data: Some(format!(
                                 "delete_campaign {} {}",
                                 chan.id, campaign.id
@@ -959,13 +1085,14 @@ async fn callback_handler(context: Context, update: Update) {
             let mut text: String = "".to_string();
             if !campaigns.is_empty() {
                 text += "```\n";
-                let mut table = Table::new("{:<} | {:<} | {:<} | {:<}");
+                let mut table = Table::new("{:<} | {:<} | {:<} | {:<} | {:<}");
                 table.add_row(
                     Row::new()
                         .with_cell("Name")
                         .with_cell("Start")
                         .with_cell("End")
-                        .with_cell("Prize"),
+                        .with_cell("Prize")
+                        .with_cell("Started"),
                 );
                 for (_, campaign) in campaigns.iter().enumerate() {
                     table.add_row(
@@ -973,10 +1100,21 @@ async fn callback_handler(context: Context, update: Update) {
                             .with_cell(&campaign.name)
                             .with_cell(campaign.start)
                             .with_cell(campaign.end)
-                            .with_cell(&campaign.prize),
+                            .with_cell(&campaign.prize)
+                            .with_cell(match campaign.started_at {
+                                Some(x) => format!("{}", x),
+                                None => "No".to_string(),
+                            }),
                     );
                 }
-                text += &format!("{}```\n\n{}", table, escape_markdown("Dates are all converted to UTC timezone.\nThis table is better on Desktop.", None));
+                text += &format!(
+                    "{}```\n\n{}",
+                    table,
+                    escape_markdown(
+                        "Dates are all converted to UTC timezone.\nBetter view on desktop.",
+                        None
+                    )
+                );
             }
             text
         };
@@ -1008,7 +1146,7 @@ async fn callback_handler(context: Context, update: Update) {
     if delete_campaign {
         let res = {
             let guard = context.data.read();
-            let map = guard.get::<HashMapKey>().expect("hashmap");
+            let map = guard.get::<DBKey>().expect("db");
             let conn = map.get().unwrap();
             let mut stmt = conn.prepare("DELETE FROM campaigns WHERE id = ?").unwrap();
             stmt.execute(params![campaign_id])
@@ -1026,7 +1164,113 @@ async fn callback_handler(context: Context, update: Update) {
             .await;
         if res.is_err() {
             let err = res.err().unwrap();
-            error!("[message handler] send message (loop admin) error: {}", err);
+            error!("[message handler] send message error: {}", err);
+        }
+
+        remove_loading_icon(&context, &callback.id, None).await;
+        display_manage_menu(&context, &message, &chan).await;
+        delete_parent_message(&context, &message, parent_message).await;
+    }
+
+    if start_campaign {
+        let c = {
+            let now: DateTime<Utc> = Utc::now();
+            let guard = context.data.read();
+            let map = guard.get::<DBKey>().expect("db");
+            let conn = map.get().unwrap();
+            let mut stmt = conn.prepare("UPDATE campaigns SET started_at = ? WHERE id = ? RETURNING id, name, prize, start, end, started_at").unwrap();
+            let mut iter = stmt
+                .query_map(params![now, campaign_id], |row| {
+                    Ok(Campaign {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        prize: row.get(2)?,
+                        start: row.get(3)?,
+                        end: row.get(4)?,
+                        started_at: row.get(5)?,
+                        chan: chan.id,
+                    })
+                })
+                .unwrap();
+            iter.next().unwrap()
+        };
+        let text = if c.is_err() {
+            let err = c.as_ref().err().unwrap();
+            error!("update/start campaigns: {}", err);
+            err.to_string()
+        } else {
+            "Campagin started!".to_string()
+        };
+        let c = c.unwrap();
+        let res = context
+            .api
+            .send_message(SendMessage::new(message.chat.get_id(), &text))
+            .await;
+        if res.is_err() {
+            let err = res.err().unwrap();
+            error!("[message handler] send message error: {}", err);
+        }
+
+        // Send message in the channel, indicating the campaign name
+        // the end date, the prize, and pin it on top until the end date comes
+        // or the campaign is stopped or deleted
+        let bot_name = {
+            let guard = context.data.read();
+            guard
+                .get::<NameKey>()
+                .expect("name")
+                .clone()
+                .replace('@', "")
+        };
+        let params = BASE64URL.encode(format!("chan={}&campaign={}", chan.id, c.id).as_bytes());
+        let text = format!(
+            "{title}\n\n{rules}\n\n{bot_link}",
+            title = format!(
+                "🔥**{} {prize}** 🔥",
+                escape_markdown("Challenge! Who invites more friends wins ", None),
+                prize = escape_markdown(&c.prize, None),
+            ),
+            rules = format!(
+                "{}, **{prize}**",
+                escape_markdown(
+                    "1. Start the challenge bot using the link below\n\
+                    2. The bot will create a link for you\n\
+                    3. Share the link with your friends!\n\n\
+                    At the end of the challenge ({end_date}) the user that referred more friends\
+                    will win a ",
+                    None
+                ),
+                prize = escape_markdown(&c.prize, None),
+            ),
+            bot_link = escape_markdown(
+                &format!(
+                    "https://t.me/{bot_name}?start={params}",
+                    bot_name = bot_name,
+                    params = params
+                ),
+                None
+            ),
+        );
+
+        let mut reply = SendMessage::new(c.chan, &text);
+        reply.set_parse_mode(&ParseMode::MarkdownV2);
+        let res = context.api.send_message(reply).await;
+        if res.is_err() {
+            let err = res.unwrap_err();
+            error!("[message handler] send message error: {}", err);
+        } else {
+            // Pin message
+            let res = context
+                .api
+                .pin_chat_message(PinChatMessage {
+                    chat_id: c.chan,
+                    message_id: res.unwrap().message_id,
+                    disable_notification: false,
+                })
+                .await;
+            if res.is_err() {
+                error!("[pin message] error: {}", res.unwrap_err());
+            }
         }
 
         remove_loading_icon(&context, &callback.id, None).await;
@@ -1089,13 +1333,13 @@ fn campaign_from_text(text: &str, chan: i64) -> Result<Campaign, CampaignError> 
         elements[1] += ":00";
         elements.join(" ")
     };
-    let start: DateTime<chrono::Utc> =
+    let start: DateTime<Utc> =
         DateTime::parse_from_str(&add_seconds(rows[1]), "%Y-%m-%d %H:%M:%S %#z")?.into();
-    let now = chrono::Utc::now();
+    let now = Utc::now();
     if start < now {
         return Err("Start date can't be in the past".to_string().into());
     }
-    let end: DateTime<chrono::Utc> =
+    let end: DateTime<Utc> =
         DateTime::parse_from_str(&add_seconds(rows[2]), "%Y-%m-%d %H:%M:%S %#z")?.into();
     if end < now {
         return Err("End date can't be in the past".to_string().into());
@@ -1110,6 +1354,7 @@ fn campaign_from_text(text: &str, chan: i64) -> Result<Campaign, CampaignError> 
         name,
         prize,
         chan,
+        started_at: None,
     })
 }
 
@@ -1193,7 +1438,7 @@ async fn message_handler(context: Context, update: Update) {
                 .await;
             if res.is_err() {
                 let err = res.err().unwrap();
-                error!("[message handler] send message (loop admin) error: {}", err);
+                error!("[message handler] send message error: {}", err);
             }
             return;
         }
@@ -1213,7 +1458,7 @@ async fn message_handler(context: Context, update: Update) {
                         .await;
                     if res.is_err() {
                         let err = res.err().unwrap();
-                        error!("[message handler] send message (loop admin) error: {}", err);
+                        error!("[message handler] send message error: {}", err);
                     }
                     return;
                 }
@@ -1238,14 +1483,14 @@ async fn message_handler(context: Context, update: Update) {
                 .await;
             if res.is_err() {
                 let err = res.err().unwrap();
-                error!("[message handler] send message (loop admin) error: {}", err);
+                error!("[message handler] send message error: {}", err);
             }
             return;
         }
 
         let res = {
             let guard = context.data.read();
-            let map = guard.get::<HashMapKey>().expect("hashmap");
+            let map = guard.get::<DBKey>().expect("db");
             let conn = map.get().unwrap();
 
             conn.execute(
@@ -1306,15 +1551,16 @@ async fn message_handler(context: Context, update: Update) {
         let channels = get_channels(&context, message); // channels registered by the user
         let chan = {
             let guard = context.data.read();
-            let map = guard.get::<HashMapKey>().expect("hashmap");
+            let map = guard.get::<DBKey>().expect("db");
             let conn = map.get().unwrap();
-            // There should be only one at the time, from the same user, being edited. Hence loop
-            // only once.
+            // In the begin_managed_channels we have all the channels ever managed, we can order
+            // them by ID and keep only tha latest one, since there can be only one managed channel
+            // at a time, by the same user.
             let mut stmt = conn
                 .prepare(&format!(
                     "SELECT channels.id, channels.link, channels.name, channels.registered_by FROM \
-                    channels INNER JOIN being_managed_channels \
-                    WHERE being_managed_channels.chan IN ({})",
+                    channels INNER JOIN being_managed_channels ON channels.id = being_managed_channels.chan \
+                    WHERE being_managed_channels.chan IN ({}) ORDER BY being_managed_channels.id DESC LIMIT 1",
                     channels
                         .iter()
                         .map(|c| c.id.to_string())
@@ -1343,29 +1589,29 @@ async fn message_handler(context: Context, update: Update) {
             if let Ok(campaign) = campaign {
                 let res = {
                     let guard = context.data.read();
-                    let map = guard.get::<HashMapKey>().expect("hashmap");
+                    let map = guard.get::<DBKey>().expect("db");
                     let conn = map.get().unwrap();
                     conn.execute(
                         "INSERT INTO campaigns(name, start, end, prize, chan)  VALUES(?, ?, ?, ?, ?)",
                         params![campaign.name, campaign.start, campaign.end, campaign.prize, campaign.chan]
                     )
                 };
-                if res.is_err() {
+
+                let text = if res.is_err() {
                     let err = res.err().unwrap();
                     error!("[insert campaign] error: {}", err);
+                    format!("Error: {}", err)
                 } else {
-                    let res = context
-                        .api
-                        .send_message(SendMessage::new(
-                            message.chat.get_id(),
-                            &format!("Campaing {} created succesfully!", campaign.name),
-                        ))
-                        .await;
+                    format!("Campaing {} created succesfully!", campaign.name)
+                };
+                let res = context
+                    .api
+                    .send_message(SendMessage::new(message.chat.get_id(), &text))
+                    .await;
 
-                    if res.is_err() {
-                        let err = res.err().unwrap();
-                        error!("[message handler] campaing ok send error: {}", err);
-                    }
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[message handler] campaign ok send error: {}", err);
                 }
             } else {
                 let err = campaign.unwrap_err();
@@ -1381,24 +1627,12 @@ async fn message_handler(context: Context, update: Update) {
 
                 if res.is_err() {
                     let err = res.err().unwrap();
-                    error!("[message handler] campaing ok send error: {}", err);
+                    error!("[message handler] campaign ok send error: {}", err);
                 }
             }
-            // Delete from the currently managing campaigns, since creating is completed
-            let res = {
-                let guard = context.data.read();
-                let map = guard.get::<HashMapKey>().expect("hashmap");
-                let conn = map.get().unwrap();
-                let mut stmt = conn
-                    .prepare("DELETE FROM being_managed_channels WHERE chan = ?")
-                    .unwrap();
-                stmt.execute(params![chan.id])
-            };
-            if res.is_err() {
-                error!("delete from being_managed_channels: {}", res.unwrap_err());
-            }
-
-            display_manage_menu(&context, &message, &chan).await;
+            // No need to delete the currently beign managed channel. We alwasy look for the last
+            // "being managed" inserted by this user
+            display_manage_menu(&context, message, &chan).await;
         }
         // else, if no channel is being edited, ignore and move on
     }
@@ -1432,9 +1666,11 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
                source INTEGER NOT NULL,
                dest INTEGER NOT NULL,
                chan INTEGER NOT NULL,
+               campaign INTEGER NOT NULL,
                FOREIGN KEY(source) REFERENCES users(id),
                FOREIGN KEY(dest) REFERENCES users(id),
                FOREIGN KEY(chan) REFERENCES channels(id),
+               FOREIGN KEY(campaign) REFERENCES campaigns(id),
                UNIQUE(source, dest, chan)
             );
             CREATE TABLE IF NOT EXISTS campaigns(
@@ -1444,11 +1680,13 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
               start TIMESTAMP NOT NULL,
               end TIMESTAMP NOT NULL,
               chan INTEGER NOT NULL,
+              started_at TIMESTAMP NULL,
               FOREIGN KEY(chan) REFERENCES channels(id),
-              UNIQUE(name)
+              UNIQUE(name, chan)
             );
             CREATE TABLE IF NOT EXISTS being_managed_channels(
-              chan INTEGER NOT NULL PRIMARY KEY,
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              chan INTEGER NOT NULL,
               FOREIGN KEY(chan) REFERENCES channels(id)
             );
             COMMIT;",
@@ -1466,16 +1704,17 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
     // Hence, we don't know by the message alone what was the user currently managing
     // because in the raw text message callback we only have a single info, that's the user
     // sender id.
-    // Once received the text message and made the association chan<-> user we must delete
-    // the entry in the being_managed_channels table, so the next raw message by this user
-    // is not associated with the campaign management phase.
 
     pool
 }
 
-struct HashMapKey;
-impl Key for HashMapKey {
+struct DBKey;
+impl Key for DBKey {
     type Value = r2d2::Pool<SqliteConnectionManager>;
+}
+struct NameKey;
+impl Key for NameKey {
+    type Value = String;
 }
 
 use log::LevelFilter;
@@ -1488,16 +1727,12 @@ async fn main() -> telexide::Result<()> {
 
     let pool = init_db();
     let token = env::var("TOKEN").expect("Provide the token via TOKEN env var");
+    let bot_name = env::var("BOT_NAME").expect("Provide the bot name via BOT_NAME env var");
 
     let client = ClientBuilder::new()
         .set_token(&token)
         .set_framework(create_framework!(
-            "test_test_testa_bot",
-            help,
-            start,
-            register,
-            campaign,
-            list
+            &bot_name, help, start, register, campaign, list
         ))
         .set_allowed_updates(vec![UpdateType::CallbackQuery, UpdateType::Message])
         .add_handler_func(message_handler)
@@ -1506,7 +1741,8 @@ async fn main() -> telexide::Result<()> {
 
     {
         let mut data = client.data.write();
-        data.insert::<HashMapKey>(pool);
+        data.insert::<DBKey>(pool);
+        data.insert::<NameKey>(bot_name);
     }
     client.start().await.expect("WAT");
     Ok(())
