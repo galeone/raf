@@ -1221,7 +1221,7 @@ async fn callback_handler(context: Context, update: Update) {
         if !rank.is_empty() {
             // Send top-10 to the channel and pin the message
             let mut m = format!(
-                "🏆 Contest ({}) finished 🏆\nHere's the Top-10: \n\n",
+                "🏆 Contest ({}) finished 🏆\n\n\n",
                 c.name
             );
             let winner = rank[0].user.clone();
@@ -1346,11 +1346,11 @@ async fn callback_handler(context: Context, update: Update) {
             &escape_markdown(
                 &format!(
                     "Write a single message with every required info on a new line\n\n\
-                Campagin name\n\
+                Contest name\n\
                 End date (YYY-MM-DD hh:mm TZ)\n\
                 Prize\n\n\
                 For example a valid message is (note the GMT+1 timezone written as +01):\n\n\
-                {month_string}\n\
+                {month_string} {year}\n\
                 {year}-{month}-28 20:00 +01\n\
                 Amazon 50€ Gift Card\n",
                     year = now.format("%Y"),
@@ -1573,7 +1573,7 @@ async fn callback_handler(context: Context, update: Update) {
                 error!("update/start contests: {}", err);
                 err.to_string()
             } else {
-                "Campagin started!".to_string()
+                "Contest started!".to_string()
             };
             let c = c.unwrap();
             let res = context
@@ -1977,7 +1977,7 @@ async fn message_handler(context: Context, update: Update) {
                         error!("[insert contest] error: {}", err);
                         format!("Error: {}", err)
                     } else {
-                        format!("Campaing {} created succesfully!", contest.name)
+                        format!("Contest {} created succesfully!", contest.name)
                     };
                     let res = context
                         .api
@@ -2011,7 +2011,16 @@ async fn message_handler(context: Context, update: Update) {
                 // No need to delete the currently beign managed channel. We alwasy look for the last
                 // "being managed" inserted by this user
                 display_manage_menu(&context, message, &chan).await;
-                // else, if no channel is being edited, ignore and move on
+                // else, if no channel is being edited, but we received a 3 lines message, send
+                // "unknown message" back
+            } else {
+                let reply = SendMessage::new(message.chat.get_id(), "Unknown message.");
+                let res = context.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[None winner] error: {}", err);
+                }
+                display_main_commands(&context, message).await;
             }
         } else {
             // text splitted in a number of rows != 3 -> it can be a message
@@ -2064,8 +2073,7 @@ async fn message_handler(context: Context, update: Update) {
                     }
                 }
             } else {
-                let reply = SendMessage::new(message.chat.get_id(),
-                "Unknown message. Something wrong happened");
+                let reply = SendMessage::new(message.chat.get_id(), "Unknown message.");
                 let res = context.api.send_message(reply).await;
                 if res.is_err() {
                     let err = res.err().unwrap();
