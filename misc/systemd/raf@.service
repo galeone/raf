@@ -1,0 +1,16 @@
+[Unit]
+Description=RaF - Refer A Friend contest creator for Telegram Channels
+Documentation=https://github.com/galeone/raf
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+User=%I
+Type=simple
+EnvironmentFile=/home/%I/.raf/raf.env
+WorkingDirectory=/home/%I/.raf/
+ExecStart=/home/%I/.cargo/bin/raf
+
+[Install]
+WantedBy=multi-user.target
