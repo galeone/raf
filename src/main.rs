@@ -109,9 +109,7 @@ fn get_contest(context: &Context, id: i64) -> Option<Contest> {
     let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
     let mut stmt = conn
-        .prepare(
-            "SELECT name, prize, end, started_at, chan, stopped FROM contests WHERE id = ?",
-        )
+        .prepare("SELECT name, prize, end, started_at, chan, stopped FROM contests WHERE id = ?")
         .unwrap();
     let mut iter = stmt
         .query_map(params![id], |row| {
@@ -460,7 +458,7 @@ async fn start(context: Context, message: Message) -> CommandResult {
             let inline_keyboard = vec![vec![
                 InlineKeyboardButton {
                     text: "Accept ✅".to_owned(),
-                    // tick, source, dest, chan
+                    // tick, source, dest, chan, contest
                     callback_data: Some(format!(
                         "✅ {} {} {} {}",
                         user.id,
@@ -957,19 +955,28 @@ async fn callback_handler(context: Context, update: Update) {
     let chan = chan.unwrap();
 
     if accepted {
-        /*
-         * TODO: uncomment me before release
-         * This is a check for already existing users in the channel
-         */
-        /*
+        // Self invite is forbidden
+        if source == dest {
+            let text = escape_markdown("You can't invite yourself!", None);
+            let mut reply = SendMessage::new(message.chat.get_id(), &text);
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+            let res = context.api.send_message(reply).await;
+            if res.is_err() {
+                let err = res.err().unwrap();
+                error!("[self invite] error: {}", err);
+            }
+            remove_loading_icon(&context, &callback.id, None).await;
+            return;
+        }
+        // Check if the dest of the invite is already in the channel
         let member = context
             .api
             .get_chat_member(GetChatMember {
                 chat_id: chan.id,
-                user_id: invite.dest,
+                user_id: dest,
             })
             .await;
-        if member.is_ok() {
+        if member.is_ok() && member.unwrap().get_user().id == dest {
             let text = format!(
                 "You are already a member of [{}]({})\\.",
                 escape_markdown(&chan.name.to_string(), None),
@@ -980,11 +987,11 @@ async fn callback_handler(context: Context, update: Update) {
             let res = context.api.send_message(reply).await;
             if res.is_err() {
                 let err = res.err().unwrap();
-                error!("[help] error: {}", err);
+                error!("[accepted] error: {}", err);
             }
+            remove_loading_icon(&context, &callback.id, None).await;
             return;
         }
-        */
         let res = context
             .api
             .answer_callback_query(AnswerCallbackQuery {
@@ -1646,7 +1653,8 @@ async fn callback_handler(context: Context, update: Update) {
                         .clone()
                         .replace('@', "")
                 };
-                let params = BASE64URL.encode(format!("chan={}&contest={}", chan.id, c.id).as_bytes());
+                let params =
+                    BASE64URL.encode(format!("chan={}&contest={}", chan.id, c.id).as_bytes());
                 let text = format!(
                     "{title}\n\n{rules}\n\n{bot_link}",
                     title = escape_markdown(
