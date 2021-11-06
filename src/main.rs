@@ -161,9 +161,11 @@ fn contest_ranking(context: &Context, contest: &Contest) -> Vec<Rank> {
     let guard = context.data.read();
     let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
+    // NOTE: the ordering ALSO via t.source is required to give a meaningful order (depending on
+    // the id, hence jsut to have them different) in case of equal rank
     let mut stmt = conn
             .prepare(
-                "SELECT RANK () OVER (ORDER BY COUNT(*) DESC) AS r, t.c, t.source
+                "SELECT ROW_NUMBER() OVER (ORDER BY t.c, t.source DESC) AS r, t.c, t.source
                 FROM (SELECT COUNT(*) AS c, source FROM invitations WHERE contest = ? GROUP BY source) AS t",
             )
             .unwrap();
@@ -189,8 +191,8 @@ async fn rank(context: Context, message: Message) -> CommandResult {
         let conn = map.get().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT RANK () OVER (ORDER BY COUNT(*) DESC) AS r, t.contest
-                FROM (SELECT COUNT(*), contest, source FROM invitations GROUP BY contest, source) AS t
+                "SELECT ROW_NUMBER() OVER (ORDER BY t.c, t.source DESC) AS r, t.contest
+                FROM (SELECT COUNT(*) AS c, contest, source FROM invitations GROUP BY contest, source) AS t
                 WHERE t.source = ?",
             )
             .unwrap();
