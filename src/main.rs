@@ -69,6 +69,7 @@ struct Contest {
     prize: String,
     end: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
+    stopped: bool,
     chan: i64,
 }
 
@@ -108,17 +109,20 @@ fn get_contest(context: &Context, id: i64) -> Option<Contest> {
     let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
     let mut stmt = conn
-        .prepare("SELECT id, name, prize, end, started_at, chan FROM contests WHERE id = ?")
+        .prepare(
+            "SELECT name, prize, end, started_at, chan, stopped FROM contests WHERE id = ?",
+        )
         .unwrap();
     let mut iter = stmt
         .query_map(params![id], |row| {
             Ok(Contest {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                prize: row.get(2)?,
-                end: row.get(3)?,
-                started_at: row.get(4)?,
-                chan: row.get(5)?,
+                id,
+                name: row.get(0)?,
+                prize: row.get(1)?,
+                end: row.get(2)?,
+                started_at: row.get(3)?,
+                chan: row.get(4)?,
+                stopped: row.get(5)?,
             })
         })
         .unwrap();
@@ -607,7 +611,7 @@ fn get_contests(context: &Context, chan: i64) -> Vec<Contest> {
     let conn = map.get().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, prize, end, started_at FROM contests WHERE chan = ? ORDER BY end DESC",
+            "SELECT id, name, prize, end, started_at, stopped FROM contests WHERE chan = ? ORDER BY end DESC",
         )
         .unwrap();
 
@@ -619,6 +623,7 @@ fn get_contests(context: &Context, chan: i64) -> Vec<Contest> {
                 prize: row.get(2)?,
                 end: row.get(3)?,
                 started_at: row.get(4)?,
+                stopped: row.get(5)?,
                 chan,
             })
         })
@@ -1101,7 +1106,10 @@ async fn callback_handler(context: Context, update: Update) {
     }
 
     if start {
-        let contests = get_contests(&context, chan.id);
+        let contests = get_contests(&context, chan.id)
+            .into_iter()
+            .filter(|c| c.started_at.is_none())
+            .collect::<Vec<Contest>>();
         if contests.is_empty() {
             remove_loading_icon(
                 &context,
@@ -1158,7 +1166,7 @@ async fn callback_handler(context: Context, update: Update) {
     if stop {
         let contests = get_contests(&context, chan.id)
             .into_iter()
-            .filter(|c| c.started_at.is_some())
+            .filter(|c| c.started_at.is_some() && !c.stopped)
             .collect::<Vec<Contest>>();
         if contests.is_empty() {
             remove_loading_icon(
@@ -1214,118 +1222,10 @@ async fn callback_handler(context: Context, update: Update) {
         // Clean up ranks from users that joined and then left the channel
         info!("contest id: {}", contest_id);
         let c = get_contest(&context, contest_id).unwrap();
-        validate_users_in_contest(&context, &c).await;
-
-        // Create rank
-        let rank = contest_ranking(&context, &c);
-        if !rank.is_empty() {
-            // Send top-10 to the channel and pin the message
-            let mut m = format!(
-                "🏆 Contest ({}) finished 🏆\n\n\n",
-                c.name
-            );
-            let winner = rank[0].user.clone();
-            for row in rank {
-                let user = row.user;
-                let rank = row.rank;
-                let invites = row.invites;
-                if rank == 1 {
-                    m += "🥇#1!";
-                } else if rank <= 3 {
-                    m += &format!("🏆 #{}", rank);
-                } else {
-                    m += &format!("#{}", rank);
-                }
-
-                m += &format!(
-                    " {}{}{} inv: {}\n",
-                    user.first_name,
-                    match user.last_name {
-                        Some(last_name) => format!(" {}", last_name),
-                        None => "".to_string(),
-                    },
-                    match user.username {
-                        Some(username) => format!(" ({})", username),
-                        None => "".to_string(),
-                    },
-                    invites
-                );
-            }
-            m += &format!(
-                "\n\nThe prize ({}) is being delivered to our champion 🥇. Congratulations!!",
-                c.prize
-            );
-
-            m = escape_markdown(&m, None);
-
-            let mut reply = SendMessage::new(c.chan, &m);
-            reply.set_parse_mode(&ParseMode::MarkdownV2);
-            let res = context.api.send_message(reply).await;
-            if res.is_err() {
-                let err = res.unwrap_err();
-                error!("send message error: {}", err);
-            } else {
-                // Pin message
-                let res = context
-                    .api
-                    .pin_chat_message(PinChatMessage {
-                        chat_id: c.chan,
-                        message_id: res.unwrap().message_id,
-                        disable_notification: false,
-                    })
-                    .await;
-                if res.is_err() {
-                    error!("[stop pin message] error: {}", res.unwrap_err());
-                }
-            }
-
-            // Put into communication the bot user and the winner
-            let direct_communication = winner.username.is_some();
-            let text = if direct_communication {
-                let username = winner.username.unwrap();
-                format!(
-                    "The winner usename is @{}. Get in touch and send the prize!",
-                    username
-                )
-            } else {
-                "The winner has no username. It means you can communicate only through the bot.\n\n\
-                Write NOW a message that will be delivered to the winner (if you can, just send the prize!).\n\n
-                NOTE: You can only send up to one message, hence a good idea is to share your username with the winner\
-                in order to make they start a commucation with you in private.".to_string()
-            };
-            let mut reply = SendMessage::new(message.chat.get_id(), &escape_markdown(&text, None));
-            reply.set_parse_mode(&ParseMode::MarkdownV2);
-            let res = context.api.send_message(reply).await;
-            if res.is_err() {
-                let err = res.err().unwrap();
-                error!("[stop send] error: {}", err);
-            }
-            if !direct_communication {
-                // Outside of FSM
-                let res = {
-                    let user_id = message.from.clone().unwrap().id;
-                    let guard = context.data.read();
-                    let map = guard.get::<DBKey>().expect("db");
-                    let conn = map.get().unwrap();
-                    // add user to contact, the owner (me), the contest
-                    // in order to add more constraint to verify outside of this FMS
-                    // to validate and put the correct owner in contact with the correct winner
-                    conn.execute(
-                        "INSERT INTO being_contacted_users(user, owner) VALUES(?, ?)",
-                        params![winner.id, user_id],
-                    )
-                };
-
-                if res.is_err() {
-                    let err = res.err().unwrap();
-                    error!("[insert being_contacted_users] error: {}", err);
-                }
-            }
-        } else {
-            // No one partecipated in the challenge
+        if c.stopped {
             let reply = SendMessage::new(
                 message.chat.get_id(),
-                "No one partecipated to the challenge. Doing nothing.",
+                "Contest already stopped. Doing nothing.",
             );
             let res = context.api.send_message(reply).await;
             if res.is_err() {
@@ -1334,6 +1234,148 @@ async fn callback_handler(context: Context, update: Update) {
             }
             display_manage_menu(&context, &message, &chan).await;
             delete_parent_message(&context, &message, parent_message).await;
+        } else {
+            validate_users_in_contest(&context, &c).await;
+
+            // Stop contest on db
+            let c = {
+                let guard = context.data.read();
+                let map = guard.get::<DBKey>().expect("db");
+                let conn = map.get().unwrap();
+                let mut stmt = conn.prepare("UPDATE contests SET stopped = TRUE WHERE id = ? RETURNING name, prize, end, started_at").unwrap();
+                let mut iter = stmt
+                    .query_map(params![contest_id], |row| {
+                        Ok(Contest {
+                            id: contest_id,
+                            name: row.get(0)?,
+                            prize: row.get(1)?,
+                            end: row.get(2)?,
+                            started_at: row.get(3)?,
+                            stopped: true,
+                            chan: chan.id,
+                        })
+                    })
+                    .unwrap();
+                iter.next().unwrap().unwrap()
+            };
+
+            // Create rank
+            let rank = contest_ranking(&context, &c);
+            if !rank.is_empty() {
+                // Send top-10 to the channel and pin the message
+                let mut m = format!("🏆 Contest ({}) finished 🏆\n\n\n", c.name);
+                let winner = rank[0].user.clone();
+                for row in rank {
+                    let user = row.user;
+                    let rank = row.rank;
+                    let invites = row.invites;
+                    if rank == 1 {
+                        m += "🥇#1!";
+                    } else if rank <= 3 {
+                        m += &format!("🏆 #{}", rank);
+                    } else {
+                        m += &format!("#{}", rank);
+                    }
+
+                    m += &format!(
+                        " {}{}{} - {}\n",
+                        user.first_name,
+                        match user.last_name {
+                            Some(last_name) => format!(" {}", last_name),
+                            None => "".to_string(),
+                        },
+                        match user.username {
+                            Some(username) => format!(" ({})", username),
+                            None => "".to_string(),
+                        },
+                        invites
+                    );
+                }
+                m += &format!(
+                    "\n\nThe prize ({}) is being delivered to our champion 🥇. Congratulations!!",
+                    c.prize
+                );
+
+                m = escape_markdown(&m, None);
+
+                let mut reply = SendMessage::new(c.chan, &m);
+                reply.set_parse_mode(&ParseMode::MarkdownV2);
+                let res = context.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.unwrap_err();
+                    error!("send message error: {}", err);
+                } else {
+                    // Pin message
+                    let res = context
+                        .api
+                        .pin_chat_message(PinChatMessage {
+                            chat_id: c.chan,
+                            message_id: res.unwrap().message_id,
+                            disable_notification: false,
+                        })
+                        .await;
+                    if res.is_err() {
+                        error!("[stop pin message] error: {}", res.unwrap_err());
+                    }
+                }
+
+                // Put into communication the bot user and the winner
+                let direct_communication = winner.username.is_some();
+                let text = if direct_communication {
+                    let username = winner.username.unwrap();
+                    format!(
+                        "The winner usename is @{}. Get in touch and send the prize!",
+                        username
+                    )
+                } else {
+                    "The winner has no username. It means you can communicate only through the bot.\n\n\
+                Write NOW a message that will be delivered to the winner (if you can, just send the prize!).\n\n
+                NOTE: You can only send up to one message, hence a good idea is to share your username with the winner\
+                in order to make they start a commucation with you in private.".to_string()
+                };
+                let mut reply =
+                    SendMessage::new(message.chat.get_id(), &escape_markdown(&text, None));
+                reply.set_parse_mode(&ParseMode::MarkdownV2);
+                let res = context.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[stop send] error: {}", err);
+                }
+                if !direct_communication {
+                    // Outside of FSM
+                    let res = {
+                        let user_id = message.from.clone().unwrap().id;
+                        let guard = context.data.read();
+                        let map = guard.get::<DBKey>().expect("db");
+                        let conn = map.get().unwrap();
+                        // add user to contact, the owner (me), the contest
+                        // in order to add more constraint to verify outside of this FMS
+                        // to validate and put the correct owner in contact with the correct winner
+                        conn.execute(
+                            "INSERT INTO being_contacted_users(user, owner) VALUES(?, ?)",
+                            params![winner.id, user_id],
+                        )
+                    };
+
+                    if res.is_err() {
+                        let err = res.err().unwrap();
+                        error!("[insert being_contacted_users] error: {}", err);
+                    }
+                }
+            } else {
+                // No one partecipated in the challenge
+                let reply = SendMessage::new(
+                    message.chat.get_id(),
+                    "No one partecipated to the challenge. Doing nothing.",
+                );
+                let res = context.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[stop send] error: {}", err);
+                }
+                display_manage_menu(&context, &message, &chan).await;
+                delete_parent_message(&context, &message, parent_message).await;
+            }
         }
 
         remove_loading_icon(&context, &callback.id, None).await;
@@ -1450,13 +1492,14 @@ async fn callback_handler(context: Context, update: Update) {
             let mut text: String = "".to_string();
             if !contests.is_empty() {
                 text += "```\n";
-                let mut table = Table::new("{:<} | {:<} | {:<} | {:<}");
+                let mut table = Table::new("{:<} | {:<} | {:<} | {:<} | {:<}");
                 table.add_row(
                     Row::new()
                         .with_cell("Name")
                         .with_cell("End")
                         .with_cell("Prize")
-                        .with_cell("Started"),
+                        .with_cell("Started")
+                        .with_cell("Stopped"),
                 );
                 for (_, contest) in contests.iter().enumerate() {
                     table.add_row(
@@ -1467,6 +1510,10 @@ async fn callback_handler(context: Context, update: Update) {
                             .with_cell(match contest.started_at {
                                 Some(x) => format!("{}", x),
                                 None => "No".to_string(),
+                            })
+                            .with_cell(match contest.stopped {
+                                true => "Yes".to_string(),
+                                false => "No".to_string(),
                             }),
                     );
                 }
@@ -1536,8 +1583,9 @@ async fn callback_handler(context: Context, update: Update) {
     }
 
     if start_contest {
-        let c = get_contest(&context, contest_id);
-        if c.is_some() && c.unwrap().started_at.is_some() {
+        // if contest_id is not valid, this panics (that's ok, the user is doing nasty things)
+        let c = get_contest(&context, contest_id).unwrap();
+        if c.started_at.is_some() {
             let text = "You can't start an already started contest.";
             let res = context
                 .api
@@ -1553,15 +1601,16 @@ async fn callback_handler(context: Context, update: Update) {
                 let guard = context.data.read();
                 let map = guard.get::<DBKey>().expect("db");
                 let conn = map.get().unwrap();
-                let mut stmt = conn.prepare("UPDATE contests SET started_at = ? WHERE id = ? RETURNING id, name, prize, end, started_at").unwrap();
+                let mut stmt = conn.prepare("UPDATE contests SET started_at = ? WHERE id = ? RETURNING name, prize, end").unwrap();
                 let mut iter = stmt
                     .query_map(params![now, contest_id], |row| {
                         Ok(Contest {
-                            id: row.get(0)?,
-                            name: row.get(1)?,
-                            prize: row.get(2)?,
-                            end: row.get(3)?,
-                            started_at: row.get(4)?,
+                            id: contest_id,
+                            name: row.get(0)?,
+                            prize: row.get(1)?,
+                            end: row.get(2)?,
+                            started_at: Some(now),
+                            stopped: false,
                             chan: chan.id,
                         })
                     })
@@ -1575,7 +1624,6 @@ async fn callback_handler(context: Context, update: Update) {
             } else {
                 "Contest started!".to_string()
             };
-            let c = c.unwrap();
             let res = context
                 .api
                 .send_message(SendMessage::new(message.chat.get_id(), &text))
@@ -1585,73 +1633,76 @@ async fn callback_handler(context: Context, update: Update) {
                 error!("send message error: {}", err);
             }
 
-            // Send message in the channel, indicating the contest name
-            // the end date, the prize, and pin it on top until the end date comes
-            // or the contest is stopped or deleted
-            let bot_name = {
-                let guard = context.data.read();
-                guard
-                    .get::<NameKey>()
-                    .expect("name")
-                    .clone()
-                    .replace('@', "")
-            };
-            let params = BASE64URL.encode(format!("chan={}&contest={}", chan.id, c.id).as_bytes());
-            let text = format!(
-                "{title}\n\n{rules}\n\n{bot_link}",
-                title = escape_markdown(
-                    &format!(
-                        "🔥{name} contest 🔥\nWho invites more friends wins a {prize}!",
-                        prize = c.prize,
-                        name = c.name
-                    ),
-                    None
-                ),
-                rules = format!(
-                    "{} **{prize}**\n{disclaimer}",
-                    escape_markdown(
+            if !c.is_err() {
+                let c = c.unwrap();
+                // Send message in the channel, indicating the contest name
+                // the end date, the prize, and pin it on top until the end date comes
+                // or the contest is stopped or deleted
+                let bot_name = {
+                    let guard = context.data.read();
+                    guard
+                        .get::<NameKey>()
+                        .expect("name")
+                        .clone()
+                        .replace('@', "")
+                };
+                let params = BASE64URL.encode(format!("chan={}&contest={}", chan.id, c.id).as_bytes());
+                let text = format!(
+                    "{title}\n\n{rules}\n\n{bot_link}",
+                    title = escape_markdown(
                         &format!(
-                            "1. Start the contest bot using the link below\n\
-                        2. The bot gives you a link\n\
-                        3. Share the link with your friends!\n\n\
-                        At the end of the contest ({end_date}) the user that referred more friends \
-                        will win a ",
-                            end_date = c.end
+                            "🔥{name} contest 🔥\nWho invites more friends wins a {prize}!",
+                            prize = c.prize,
+                            name = c.name
                         ),
                         None
                     ),
-                    prize = escape_markdown(&c.prize, None),
-                    disclaimer =
-                        escape_markdown("You can check your rank with the /rank command", None),
-                ),
-                bot_link = escape_markdown(
-                    &format!(
-                        "https://t.me/{bot_name}?start={params}",
-                        bot_name = bot_name,
-                        params = params
+                    rules = format!(
+                        "{} **{prize}**\n{disclaimer}",
+                        escape_markdown(
+                            &format!(
+                                "1. Start the contest bot using the link below\n\
+                            2. The bot gives you a link\n\
+                            3. Share the link with your friends!\n\n\
+                            At the end of the contest ({end_date}) the user that referred more friends \
+                            will win a ",
+                                end_date = c.end
+                            ),
+                            None
+                        ),
+                        prize = escape_markdown(&c.prize, None),
+                        disclaimer =
+                            escape_markdown("You can check your rank with the /rank command", None),
                     ),
-                    None
-                ),
-            );
+                    bot_link = escape_markdown(
+                        &format!(
+                            "https://t.me/{bot_name}?start={params}",
+                            bot_name = bot_name,
+                            params = params
+                        ),
+                        None
+                    ),
+                );
 
-            let mut reply = SendMessage::new(c.chan, &text);
-            reply.set_parse_mode(&ParseMode::MarkdownV2);
-            let res = context.api.send_message(reply).await;
-            if res.is_err() {
-                let err = res.unwrap_err();
-                error!("send message error: {}", err);
-            } else {
-                // Pin message
-                let res = context
-                    .api
-                    .pin_chat_message(PinChatMessage {
-                        chat_id: c.chan,
-                        message_id: res.unwrap().message_id,
-                        disable_notification: false,
-                    })
-                    .await;
+                let mut reply = SendMessage::new(c.chan, &text);
+                reply.set_parse_mode(&ParseMode::MarkdownV2);
+                let res = context.api.send_message(reply).await;
                 if res.is_err() {
-                    error!("[pin message] error: {}", res.unwrap_err());
+                    let err = res.unwrap_err();
+                    error!("send message error: {}", err);
+                } else {
+                    // Pin message
+                    let res = context
+                        .api
+                        .pin_chat_message(PinChatMessage {
+                            chat_id: c.chan,
+                            message_id: res.unwrap().message_id,
+                            disable_notification: false,
+                        })
+                        .await;
+                    if res.is_err() {
+                        error!("[pin message] error: {}", res.unwrap_err());
+                    }
                 }
             }
         }
@@ -1728,6 +1779,7 @@ fn contest_from_text(text: &str, chan: i64) -> Result<Contest, ContestError> {
         name,
         prize,
         chan,
+        stopped: false,
         started_at: None,
     })
 }
@@ -2064,8 +2116,8 @@ async fn message_handler(context: Context, update: Update) {
                     let err = res.err().unwrap();
                     error!("[winner communication] error: {}", err);
                 } else {
-                    let reply = SendMessage::new(message.chat.get_id(),
-                        "Message delivered to the winner!");
+                    let reply =
+                        SendMessage::new(message.chat.get_id(), "Message delivered to the winner!");
                     let res = context.api.send_message(reply).await;
                     if res.is_err() {
                         let err = res.err().unwrap();
@@ -2129,6 +2181,7 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
               end TIMESTAMP NOT NULL,
               chan INTEGER NOT NULL,
               started_at TIMESTAMP NULL,
+              stopped BOOL NOT NULL DEFAULT FALSE,
               FOREIGN KEY(chan) REFERENCES channels(id),
               UNIQUE(name, chan)
             );
