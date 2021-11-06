@@ -67,7 +67,6 @@ struct Contest {
     id: i64,
     name: String,
     prize: String,
-    start: DateTime<Utc>,
     end: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
     chan: i64,
@@ -86,7 +85,7 @@ struct Rank {
     user: User,
 }
 
-async fn send_main_commands_message(context: &Context, message: &Message) {
+async fn display_main_commands(context: &Context, message: &Message) {
     let text = escape_markdown(
         "What do you want to do?\n\
         /register - Register a channel to the bot\n\
@@ -109,7 +108,7 @@ fn get_contest(context: &Context, id: i64) -> Option<Contest> {
     let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
     let mut stmt = conn
-        .prepare("SELECT id, name, prize, start, end, started_at, chan FROM contests WHERE id = ?")
+        .prepare("SELECT id, name, prize, end, started_at, chan FROM contests WHERE id = ?")
         .unwrap();
     let mut iter = stmt
         .query_map(params![id], |row| {
@@ -117,10 +116,9 @@ fn get_contest(context: &Context, id: i64) -> Option<Contest> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 prize: row.get(2)?,
-                start: row.get(3)?,
-                end: row.get(4)?,
-                started_at: row.get(5)?,
-                chan: row.get(6)?,
+                end: row.get(3)?,
+                started_at: row.get(4)?,
+                chan: row.get(5)?,
             })
         })
         .unwrap();
@@ -148,9 +146,11 @@ fn get_user(context: &Context, id: i64) -> Option<User> {
             })
         })
         .unwrap();
-    let user = iter.next().unwrap();
-    if let Ok(user) = user {
-        return Some(user);
+    if let Some(user) = iter.next() {
+        return match user {
+            Ok(user) => Some(user),
+            Err(_) => None,
+        };
     }
     None
 }
@@ -162,7 +162,7 @@ fn contest_ranking(context: &Context, contest: &Contest) -> Vec<Rank> {
     let mut stmt = conn
             .prepare(
                 "SELECT RANK () OVER (ORDER BY COUNT(*) DESC) AS r, t.c, t.source
-                FROM (SELECT COUNT(*) AS c, source FROM invitations WHERE t.contest = ? GROUP BY source) AS t",
+                FROM (SELECT COUNT(*) AS c, source FROM invitations WHERE contest = ? GROUP BY source) AS t",
             )
             .unwrap();
     stmt.query_map(params![contest.id], |row| {
@@ -217,7 +217,7 @@ async fn rank(context: Context, message: Message) -> CommandResult {
         for rank_contest in rank_per_user_contest {
             let c = rank_contest.c;
             let rank = rank_contest.rank;
-            m += &format!("Contest \"{}\": ", c.name);
+            m += &format!("Contest \"{}({})\": ", c.name, c.end);
             if rank == 1 {
                 m += "🥇#1!";
             } else if rank <= 3 {
@@ -237,7 +237,7 @@ async fn rank(context: Context, message: Message) -> CommandResult {
         error!("[help] error: {}", err);
     }
 
-    send_main_commands_message(&context, &message).await;
+    display_main_commands(&context, &message).await;
     info!("rank command end");
     Ok(())
 }
@@ -279,7 +279,7 @@ async fn contest(context: Context, message: Message) -> CommandResult {
             let err = res.err().unwrap();
             error!("[list channels] error: {}", err);
         }
-        send_main_commands_message(&context, &message).await;
+        display_main_commands(&context, &message).await;
     } else {
         let mut reply = SendMessage::new(
             message.chat.get_id(),
@@ -410,27 +410,7 @@ async fn start(context: Context, message: Message) -> CommandResult {
                 .next();
 
             let user = get_user(&context, source);
-
-            let mut stmt = conn
-                .prepare(
-                    "SELECT name, prize, start, end, started_at, chan FROM contests WHERE id = ?",
-                )
-                .unwrap();
-            let c = stmt
-                .query_map(params![contest_id], |row| {
-                    Ok(Contest {
-                        id: contest_id,
-                        name: row.get(0)?,
-                        prize: row.get(1)?,
-                        start: row.get(2)?,
-                        end: row.get(3)?,
-                        started_at: row.get(4)?,
-                        chan: row.get(5)?,
-                    })
-                })
-                .unwrap()
-                .map(|c| c.unwrap())
-                .next();
+            let c = get_contest(&context, contest_id);
             (user, channel, c)
         };
 
@@ -455,18 +435,21 @@ async fn start(context: Context, message: Message) -> CommandResult {
 
             let mut reply = SendMessage::new(
                 message.chat.get_id(),
-                &format!(
-                    "{}{}{} invited you to join {}",
-                    user.first_name,
-                    match user.last_name {
-                        Some(last_name) => format!(" {}", last_name),
-                        None => "".to_string(),
-                    },
-                    match user.username {
-                        Some(username) => format!(" ({})", username),
-                        None => "".to_string(),
-                    },
-                    channel.name
+                &escape_markdown(
+                    &format!(
+                        "{}{}{} invited you to join {}",
+                        user.first_name,
+                        match user.last_name {
+                            Some(last_name) => format!(" {}", last_name),
+                            None => "".to_string(),
+                        },
+                        match user.username {
+                            Some(username) => format!(" (@{})", username),
+                            None => "".to_string(),
+                        },
+                        channel.name
+                    ),
+                    None,
                 ),
             );
 
@@ -569,12 +552,13 @@ async fn register(context: Context, message: Message) -> CommandResult {
         .api
         .send_message(SendMessage::new(
             message.chat.get_id(),
-            "To Register your channel to RaF please:\n\n\
+            "To register your channel to RaF please:\n\n\
             1) Add the bot as admin in your channel.\n\
             2) Forward a message from your channel to complete the registartion.",
         ))
         .await?;
 
+    display_main_commands(&context, &message).await;
     info!("register command exit");
     Ok(())
 }
@@ -623,7 +607,7 @@ fn get_contests(context: &Context, chan: i64) -> Vec<Contest> {
     let conn = map.get().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, prize, start, end, started_at FROM contests WHERE chan = ? ORDER BY end DESC",
+            "SELECT id, name, prize, end, started_at FROM contests WHERE chan = ? ORDER BY end DESC",
         )
         .unwrap();
 
@@ -633,9 +617,8 @@ fn get_contests(context: &Context, chan: i64) -> Vec<Contest> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 prize: row.get(2)?,
-                start: row.get(3)?,
-                end: row.get(4)?,
-                started_at: row.get(5)?,
+                end: row.get(3)?,
+                started_at: row.get(4)?,
                 chan,
             })
         })
@@ -676,7 +659,7 @@ async fn list(context: Context, message: Message) -> CommandResult {
         let err = res.err().unwrap();
         error!("[list channels] error: {}", err);
     }
-    send_main_commands_message(&context, &message).await;
+    display_main_commands(&context, &message).await;
 
     info!("list command exit");
     Ok(())
@@ -829,8 +812,8 @@ async fn callback_handler(context: Context, update: Update) {
         (false, false, false, false, false);
     // Back to main menu
     let mut main = false;
-    // Start/Delete Contest commands
-    let (mut start_contest, mut delete_contest) = (false, false);
+    // Start/Stop/Delete Contest commands
+    let (mut start_contest, mut delete_contest, mut stop_contest) = (false, false, false);
     let mut contest_id = 0;
     if data.contains('✅') {
         let mut iter = data.split_ascii_whitespace();
@@ -884,6 +867,12 @@ async fn callback_handler(context: Context, update: Update) {
         chan_id = iter.next().unwrap().parse().unwrap();
         contest_id = iter.next().unwrap().parse().unwrap();
         start_contest = true;
+    } else if data.starts_with("stop_contest") {
+        let mut iter = data.split_ascii_whitespace();
+        iter.next(); // start
+        chan_id = iter.next().unwrap().parse().unwrap();
+        contest_id = iter.next().unwrap().parse().unwrap();
+        stop_contest = true;
     } else if data.starts_with("delete") {
         let mut iter = data.split_ascii_whitespace();
         iter.next(); // delete
@@ -928,7 +917,7 @@ async fn callback_handler(context: Context, update: Update) {
 
     if main {
         delete_parent_message(&context, &message, parent_message).await;
-        send_main_commands_message(&context, &message).await;
+        display_main_commands(&context, &message).await;
         return;
     }
 
@@ -1167,7 +1156,63 @@ async fn callback_handler(context: Context, update: Update) {
     }
 
     if stop {
+        let contests = get_contests(&context, chan.id)
+            .into_iter()
+            .filter(|c| c.started_at.is_some())
+            .collect::<Vec<Contest>>();
+        if contests.is_empty() {
+            remove_loading_icon(
+                &context,
+                &callback.id,
+                Some("You have no contests to stop!"),
+            )
+            .await;
+        } else {
+            let mut reply = SendMessage::new(
+                message.chat.get_id(),
+                &escape_markdown("Select the contest to stop", None),
+            );
+            let mut partition_size: usize = contests.len() / 2;
+            if partition_size < 2 {
+                partition_size = 1;
+            }
+            let inline_keyboard: Vec<Vec<InlineKeyboardButton>> = contests
+                .chunks(partition_size)
+                .map(|chunk| {
+                    chunk
+                        .iter()
+                        .map(|contest| InlineKeyboardButton {
+                            text: contest.name.clone(),
+                            // stop_contest, channel id, contest id
+                            callback_data: Some(format!("stop_contest {} {}", chan.id, contest.id)),
+                            callback_game: None,
+                            login_url: None,
+                            pay: None,
+                            switch_inline_query: None,
+                            switch_inline_query_current_chat: None,
+                            url: None,
+                        })
+                        .collect()
+                })
+                .collect();
+            reply.set_reply_markup(&ReplyMarkup::InlineKeyboardMarkup(InlineKeyboardMarkup {
+                inline_keyboard,
+            }));
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+
+            let res = context.api.send_message(reply).await;
+            if res.is_err() {
+                let err = res.err().unwrap();
+                error!("[create send] error: {}", err);
+            }
+            remove_loading_icon(&context, &callback.id, None).await;
+            delete_parent_message(&context, &message, parent_message).await;
+        };
+    }
+
+    if stop_contest {
         // Clean up ranks from users that joined and then left the channel
+        info!("contest id: {}", contest_id);
         let c = get_contest(&context, contest_id).unwrap();
         validate_users_in_contest(&context, &c).await;
 
@@ -1193,7 +1238,7 @@ async fn callback_handler(context: Context, update: Update) {
                 }
 
                 m += &format!(
-                    " {}{}{} #{}\n",
+                    " {}{}{} inv: {}\n",
                     user.first_name,
                     match user.last_name {
                         Some(last_name) => format!(" {}", last_name),
@@ -1207,9 +1252,11 @@ async fn callback_handler(context: Context, update: Update) {
                 );
             }
             m += &format!(
-                "The prize ({}) is being delivered to our 🥇#1. Congratulations!!",
+                "\n\nThe prize ({}) is being delivered to our champion 🥇. Congratulations!!",
                 c.prize
             );
+
+            m = escape_markdown(&m, None);
 
             let mut reply = SendMessage::new(c.chan, &m);
             reply.set_parse_mode(&ParseMode::MarkdownV2);
@@ -1233,7 +1280,9 @@ async fn callback_handler(context: Context, update: Update) {
             }
 
             // Put into communication the bot user and the winner
-            let text = if let Some(username) = winner.username {
+            let direct_communication = winner.username.is_some();
+            let text = if direct_communication {
+                let username = winner.username.unwrap();
                 format!(
                     "The winner usename is @{}. Get in touch and send the prize!",
                     username
@@ -1251,24 +1300,26 @@ async fn callback_handler(context: Context, update: Update) {
                 let err = res.err().unwrap();
                 error!("[stop send] error: {}", err);
             }
-            // Outside of FSM
-            let res = {
-                let user_id = message.from.clone().unwrap().id;
-                let guard = context.data.read();
-                let map = guard.get::<DBKey>().expect("db");
-                let conn = map.get().unwrap();
-                // add user to contact, the owner (me), the contest
-                // in order to add more constraint to verify outside of this FMS
-                // to validate and put the correct owner in contact with the correct winner
-                conn.execute(
-                    "INSERT INTO being_contacted_users(user, owner) VALUES(?, ?, ?)",
-                    params![winner.id, user_id],
-                )
-            };
+            if !direct_communication {
+                // Outside of FSM
+                let res = {
+                    let user_id = message.from.clone().unwrap().id;
+                    let guard = context.data.read();
+                    let map = guard.get::<DBKey>().expect("db");
+                    let conn = map.get().unwrap();
+                    // add user to contact, the owner (me), the contest
+                    // in order to add more constraint to verify outside of this FMS
+                    // to validate and put the correct owner in contact with the correct winner
+                    conn.execute(
+                        "INSERT INTO being_contacted_users(user, owner) VALUES(?, ?)",
+                        params![winner.id, user_id],
+                    )
+                };
 
-            if res.is_err() {
-                let err = res.err().unwrap();
-                error!("[insert being_contacted_users] error: {}", err);
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[insert being_contacted_users] error: {}", err);
+                }
             }
         } else {
             // No one partecipated in the challenge
@@ -1296,12 +1347,10 @@ async fn callback_handler(context: Context, update: Update) {
                 &format!(
                     "Write a single message with every required info on a new line\n\n\
                 Campagin name\n\
-                Start date (YYYY-MM-DD hh:mm TZ)\n\
                 End date (YYY-MM-DD hh:mm TZ)\n\
                 Prize\n\n\
                 For example a valid message is (note the GMT+1 timezone written as +01):\n\n\
                 {month_string}\n\
-                {year}-{month}-01 13:00 +01\n\
                 {year}-{month}-28 20:00 +01\n\
                 Amazon 50€ Gift Card\n",
                     year = now.format("%Y"),
@@ -1401,11 +1450,10 @@ async fn callback_handler(context: Context, update: Update) {
             let mut text: String = "".to_string();
             if !contests.is_empty() {
                 text += "```\n";
-                let mut table = Table::new("{:<} | {:<} | {:<} | {:<} | {:<}");
+                let mut table = Table::new("{:<} | {:<} | {:<} | {:<}");
                 table.add_row(
                     Row::new()
                         .with_cell("Name")
-                        .with_cell("Start")
                         .with_cell("End")
                         .with_cell("Prize")
                         .with_cell("Started"),
@@ -1414,7 +1462,6 @@ async fn callback_handler(context: Context, update: Update) {
                     table.add_row(
                         Row::new()
                             .with_cell(&contest.name)
-                            .with_cell(contest.start)
                             .with_cell(contest.end)
                             .with_cell(&contest.prize)
                             .with_cell(match contest.started_at {
@@ -1506,16 +1553,15 @@ async fn callback_handler(context: Context, update: Update) {
                 let guard = context.data.read();
                 let map = guard.get::<DBKey>().expect("db");
                 let conn = map.get().unwrap();
-                let mut stmt = conn.prepare("UPDATE contests SET started_at = ? WHERE id = ? RETURNING id, name, prize, start, end, started_at").unwrap();
+                let mut stmt = conn.prepare("UPDATE contests SET started_at = ? WHERE id = ? RETURNING id, name, prize, end, started_at").unwrap();
                 let mut iter = stmt
                     .query_map(params![now, contest_id], |row| {
                         Ok(Contest {
                             id: row.get(0)?,
                             name: row.get(1)?,
                             prize: row.get(2)?,
-                            start: row.get(3)?,
-                            end: row.get(4)?,
-                            started_at: row.get(5)?,
+                            end: row.get(3)?,
+                            started_at: row.get(4)?,
                             chan: chan.id,
                         })
                     })
@@ -1648,12 +1694,12 @@ fn contest_from_text(text: &str, chan: i64) -> Result<Contest, ContestError> {
         .split('\n')
         .skip_while(|r| r.is_empty())
         .collect::<Vec<&str>>();
-    if rows.len() != 4 {
-        return Err(format!("failed because row.len() != 4. Got: {}", rows.len()).into());
+    if rows.len() != 3 {
+        return Err(format!("failed because row.len() != 3. Got: {}", rows.len()).into());
     }
     let id = -1;
     let name = rows[0].to_string();
-    let prize = rows[3].to_string();
+    let prize = rows[2].to_string();
     // user input: YYYY-MM-DD hh:mm TZ, needs to become
     // YYYY-MM-DD hh:mm:ss TZ to get enough data to create a datetime object
     let add_seconds = |row: &str| -> String {
@@ -1670,23 +1716,14 @@ fn contest_from_text(text: &str, chan: i64) -> Result<Contest, ContestError> {
         elements[1] += ":00";
         elements.join(" ")
     };
-    let start: DateTime<Utc> =
-        DateTime::parse_from_str(&add_seconds(rows[1]), "%Y-%m-%d %H:%M:%S %#z")?.into();
     let now = Utc::now();
-    if start < now {
-        return Err("Start date can't be in the past".to_string().into());
-    }
     let end: DateTime<Utc> =
-        DateTime::parse_from_str(&add_seconds(rows[2]), "%Y-%m-%d %H:%M:%S %#z")?.into();
+        DateTime::parse_from_str(&add_seconds(rows[1]), "%Y-%m-%d %H:%M:%S %#z")?.into();
     if end < now {
         return Err("End date can't be in the past".to_string().into());
     }
-    if end < start {
-        return Err("End date can't be before the start date".to_string().into());
-    }
     Ok(Contest {
         id,
-        start,
         end,
         name,
         prize,
@@ -1770,13 +1807,14 @@ async fn message_handler(context: Context, update: Update) {
                 .api
                 .send_message(SendMessage::new(
                     message.chat.get_id(),
-                    "You must first add the bot as admin of the channel!",
+                    "Erro! You must add this bot as admin of the channel.",
                 ))
                 .await;
             if res.is_err() {
                 let err = res.err().unwrap();
                 error!("send message error: {}", err);
             }
+            display_main_commands(&context, message).await;
             return;
         }
         let admins = admins.unwrap();
@@ -1866,7 +1904,7 @@ async fn message_handler(context: Context, update: Update) {
             let err = res.err().unwrap();
             error!("final send message error: {}", err);
         }
-        send_main_commands_message(&context, message).await;
+        display_main_commands(&context, message).await;
     } else {
         // If we are not in the registartion flow, we just received a message
         // and we should check if the message is among the accepted ones.
@@ -1881,11 +1919,10 @@ async fn message_handler(context: Context, update: Update) {
         // in that case it's plausible that the user is sending the message in this format
         // ```
         // contest name
-        // start date (YYYY-MM-DD hh:mm TZ)
         // end date (YYYY-MM-DD hh:mm TZ)
         // prize
         // ```
-        if text.split('\n').skip_while(|r| r.is_empty()).count() == 4 {
+        if text.split('\n').skip_while(|r| r.is_empty()).count() == 3 {
             let channels = get_channels(&context, message); // channels registered by the user
             let chan = {
                 let guard = context.data.read();
@@ -1930,14 +1967,8 @@ async fn message_handler(context: Context, update: Update) {
                         let map = guard.get::<DBKey>().expect("db");
                         let conn = map.get().unwrap();
                         conn.execute(
-                            "INSERT INTO contests(name, start, end, prize, chan) VALUES(?, ?, ?, ?, ?)",
-                            params![
-                                contest.name,
-                                contest.start,
-                                contest.end,
-                                contest.prize,
-                                contest.chan
-                            ],
+                            "INSERT INTO contests(name, end, prize, chan) VALUES(?, ?, ?, ?)",
+                            params![contest.name, contest.end, contest.prize, contest.chan],
                         )
                     };
 
@@ -1963,9 +1994,12 @@ async fn message_handler(context: Context, update: Update) {
                         .api
                         .send_message(SendMessage::new(
                             message.chat.get_id(),
-                            &format!("Something wrong happened while creating your new contest.\n\n\
+                            &format!(
+                                "Something wrong happened while creating your new contest.\n\n\
                             Error: {}\n\n\
-                            Please restart the contest creating process and send a correct message (check the time zone format!)", err),
+                            Please restart the contest creating process and send a correct message",
+                                err
+                            ),
                         ))
                         .await;
 
@@ -1980,7 +2014,7 @@ async fn message_handler(context: Context, update: Update) {
                 // else, if no channel is being edited, ignore and move on
             }
         } else {
-            // text splitted in a number of rows != 4 -> it can be a message
+            // text splitted in a number of rows != 3 -> it can be a message
             // being sent from an owner to a winner
             let winner = {
                 let owner = message.from.clone().unwrap().id;
@@ -2020,9 +2054,25 @@ async fn message_handler(context: Context, update: Update) {
                 if res.is_err() {
                     let err = res.err().unwrap();
                     error!("[winner communication] error: {}", err);
+                } else {
+                    let reply = SendMessage::new(message.chat.get_id(),
+                        "Message delivered to the winner!");
+                    let res = context.api.send_message(reply).await;
+                    if res.is_err() {
+                        let err = res.err().unwrap();
+                        error!("[winner postcom] error: {}", err);
+                    }
+                }
+            } else {
+                let reply = SendMessage::new(message.chat.get_id(),
+                "Unknown message. Something wrong happened");
+                let res = context.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[None winner] error: {}", err);
                 }
             }
-            // if user is not found, do nothing even though it's very strange
+            display_main_commands(&context, message).await;
         }
     } // not in a registration flow (else)
 
@@ -2068,7 +2118,6 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT NOT NULL,
               prize TEXT NOT NULL,
-              start TIMESTAMP NOT NULL,
               end TIMESTAMP NOT NULL,
               chan INTEGER NOT NULL,
               started_at TIMESTAMP NULL,
