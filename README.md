@@ -1,4 +1,4 @@
-# Telegram RaF \[Refer a Friend\]([https://t.me/RefafBot](@RefafBot))
+# Telegram RaF \[Refer a Friend\]([@RefafBot](https://t.me/RefafBot))
 
 Telegram Bot for creating referral-based contests for your channels.
 
@@ -40,7 +40,7 @@ echo 'TOKEN="<your bot token>"' >> $HOME/.raf/raf.env
 
 ```bash
 sudo cp misc/systemd/raf@.service /lib/systemd/system/
-``
+```
 
 4. Start and enable the service
 
