@@ -109,9 +109,7 @@ fn get_contest(context: &Context, id: i64) -> Option<Contest> {
     let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
     let mut stmt = conn
-        .prepare(
-            "SELECT name, prize, end, started_at, chan, stopped FROM contests WHERE id = ?",
-        )
+        .prepare("SELECT name, prize, end, started_at, chan, stopped FROM contests WHERE id = ?")
         .unwrap();
     let mut iter = stmt
         .query_map(params![id], |row| {
@@ -959,34 +957,60 @@ async fn callback_handler(context: Context, update: Update) {
     let chan = chan.unwrap();
 
     if accepted {
-        /*
-         * TODO: uncomment me before release
-         * This is a check for already existing users in the channel
-         */
-        /*
+        // getChatMember always returns a ChatMember, even if the user never joined the chan.
+        // if the request fails, the user does not exists and we should exit
+        // if the request is ok, we need to check the type of the ChatMember
         let member = context
             .api
             .get_chat_member(GetChatMember {
                 chat_id: chan.id,
-                user_id: invite.dest,
+                user_id: user,
             })
             .await;
-        if member.is_ok() {
-            let text = format!(
-                "You are already a member of [{}]({})\\.",
-                escape_markdown(&chan.name.to_string(), None),
-                chan.link
-            );
-            let mut reply = SendMessage::new(message.chat.get_id(), &text);
-            reply.set_parse_mode(&ParseMode::MarkdownV2);
-            let res = context.api.send_message(reply).await;
-            if res.is_err() {
-                let err = res.err().unwrap();
-                error!("[help] error: {}", err);
+
+        let member_joined = |m: ChatMember| -> bool {
+            match m {
+                ChatMember::Administrator(_) => true,
+                ChatMember::Creator(_) => true,
+                ChatMember::Kicked(_) => false,
+                ChatMember::Left(_) => false,
+                ChatMember::Member(_) => true,
+                ChatMember::Restricted(_) => true,
             }
-            return;
+        };
+        match member {
+            Ok(m) => {
+                if member_joined(m) {
+                    let text = format!(
+                        "You are already a member of [{}]({})\\.",
+                        escape_markdown(&chan.name.to_string(), None),
+                        chan.link
+                    );
+                    let mut reply = SendMessage::new(message.chat.get_id(), &text);
+                    reply.set_parse_mode(&ParseMode::MarkdownV2);
+                    let res = context.api.send_message(reply).await;
+                    if res.is_err() {
+                        let err = res.err().unwrap();
+                        error!("[already member] error: {}", err);
+                    }
+                    remove_loading_icon(&context, &callback.id, None).await;
+                    return;
+                }
+            }
+            Err(err) => {
+                let text = escape_markdown(&format!("{}", err), None);
+                let mut reply = SendMessage::new(message.chat.get_id(), &text);
+                reply.set_parse_mode(&ParseMode::MarkdownV2);
+                let res = context.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[already member] error: {}", err);
+                }
+                remove_loading_icon(&context, &callback.id, None).await;
+                return;
+            }
         }
-        */
+
         let res = context
             .api
             .answer_callback_query(AnswerCallbackQuery {
@@ -1022,7 +1046,8 @@ async fn callback_handler(context: Context, update: Update) {
             })
             .await;
 
-        let joined = member.is_ok();
+        // The unwrap is likely to not fail, since the previous request is identical and succeded
+        let joined = member_joined(member.unwrap());
         if !joined {
             info!("User not joined the channel after 10 seconds...");
         } else {
@@ -1648,7 +1673,8 @@ async fn callback_handler(context: Context, update: Update) {
                         .clone()
                         .replace('@', "")
                 };
-                let params = BASE64URL.encode(format!("chan={}&contest={}", chan.id, c.id).as_bytes());
+                let params =
+                    BASE64URL.encode(format!("chan={}&contest={}", chan.id, c.id).as_bytes());
                 let text = format!(
                     "{title}\n\n{rules}\n\n{bot_link}",
                     title = escape_markdown(
@@ -2290,6 +2316,22 @@ async fn main() -> telexide::Result<()> {
         data.insert::<DBKey>(pool);
         data.insert::<NameKey>(bot_name);
     }
-    client.start().await.expect("WAT");
+
+    loop {
+        let ret = client.start().await;
+        match ret {
+            Err(err) => {
+                error!(
+                    "ApiResponse Error: {}\nWaiting a minute and retrying...",
+                    err
+                );
+                sleep(Duration::from_secs(60)).await;
+            }
+            Ok(()) => {
+                error!("Exiting from main loop without an error, but this should never happen!");
+                break;
+            }
+        }
+    }
     Ok(())
 }
