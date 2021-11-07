@@ -1050,6 +1050,15 @@ async fn callback_handler(context: Context, update: Update) {
         let joined = member_joined(member.unwrap());
         if !joined {
             info!("User not joined the channel after 10 seconds...");
+            let text = escape_markdown("You haven't joined the channel within 10 seconds :(", None);
+            let mut reply = SendMessage::new(message.chat.get_id(), &text);
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+            let res = context.api.send_message(reply).await;
+            if res.is_err() {
+                let err = res.err().unwrap();
+                error!("[not join] error: {}", err);
+            }
+
         } else {
             info!("Refer OK!");
             let c = get_contest(&context, contest_id);
