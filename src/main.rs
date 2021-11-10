@@ -1351,7 +1351,13 @@ async fn callback_handler(context: Context, update: Update) {
                         })
                         .await;
                     if res.is_err() {
-                        error!("[stop pin message] error: {}", res.unwrap_err());
+                        let err = res.unwrap_err();
+                        error!("[stop pin message] error: {}", err);
+                        let reply = SendMessage::new(message.chat.get_id(), &err.to_string());
+                        let res = context.api.send_message(reply).await;
+                        if res.is_err() {
+                            error!("[stop pin message2] error: {}", res.unwrap_err());
+                        }
                     }
                 }
 
@@ -1738,7 +1744,13 @@ async fn callback_handler(context: Context, update: Update) {
                         })
                         .await;
                     if res.is_err() {
-                        error!("[pin message] error: {}", res.unwrap_err());
+                        let err = res.unwrap_err();
+                        error!("[pin message] error: {}", err);
+                        let reply = SendMessage::new(message.chat.get_id(), &err.to_string());
+                        let res = context.api.send_message(reply).await;
+                        if res.is_err() {
+                            error!("[pin message2] error: {}", res.unwrap_err());
+                        }
                     }
                 }
             }
