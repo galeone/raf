@@ -1910,30 +1910,15 @@ async fn message_handler(context: Context, update: Update) {
         let me = context.api.get_me().await.unwrap();
         let mut found = false;
         for admin in admins {
-            let admin = match admin {
-                ChatMember::Administrator(admin_member_status) => admin_member_status,
-                _ => {
-                    let res = context
-                        .api
-                        .send_message(SendMessage::new(
-                            message.chat.get_id(),
-                            "You have a non-admin member in your admin list (how?)",
-                        ))
-                        .await;
-                    if res.is_err() {
-                        let err = res.err().unwrap();
-                        error!("send message error: {}", err);
-                    }
-                    return;
+            if let ChatMember::Administrator(admin) = admin {
+                if admin.user.is_bot
+                    && admin.user.id == me.id
+                    && admin.can_manage_chat
+                    && (admin.can_post_messages.is_some() && admin.can_post_messages.unwrap())
+                {
+                    found = true;
+                    break;
                 }
-            };
-            if admin.user.is_bot
-                && admin.user.id == me.id
-                && admin.can_manage_chat
-                && (admin.can_post_messages.is_some() && admin.can_post_messages.unwrap())
-            {
-                found = true;
-                break;
             }
         }
 
@@ -2209,6 +2194,7 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
                FOREIGN KEY(dest) REFERENCES users(id),
                FOREIGN KEY(chan) REFERENCES channels(id),
                FOREIGN KEY(contest) REFERENCES contests(id),
+               CHECK (source <> dest),
                UNIQUE(source, dest, chan)
             );
             CREATE TABLE IF NOT EXISTS contests(
