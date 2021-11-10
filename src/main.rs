@@ -1534,16 +1534,18 @@ async fn callback_handler(context: Context, update: Update) {
             let mut text: String = "".to_string();
             if !contests.is_empty() {
                 text += "```\n";
-                let mut table = Table::new("{:<} | {:<} | {:<} | {:<} | {:<}");
+                let mut table = Table::new("{:<} | {:<} | {:<} | {:<} | {:<} | {:<}");
                 table.add_row(
                     Row::new()
                         .with_cell("Name")
                         .with_cell("End")
                         .with_cell("Prize")
                         .with_cell("Started")
-                        .with_cell("Stopped"),
+                        .with_cell("Stopped")
+                        .with_cell("Users"),
                 );
                 for (_, contest) in contests.iter().enumerate() {
+                    let users = count_users_in_contest(&context, contest);
                     table.add_row(
                         Row::new()
                             .with_cell(&contest.name)
@@ -1556,7 +1558,8 @@ async fn callback_handler(context: Context, update: Update) {
                             .with_cell(match contest.stopped {
                                 true => "Yes".to_string(),
                                 false => "No".to_string(),
-                            }),
+                            })
+                            .with_cell(users)
                     );
                 }
                 text += &format!(
@@ -2250,6 +2253,25 @@ fn init_db() -> r2d2::Pool<SqliteConnectionManager> {
     // sender id.
 
     pool
+}
+
+fn count_users_in_contest(context: &Context, contest: &Contest) -> i64 {
+    struct Counter {
+        value: i64,
+    }
+    let guard = context.data.read();
+    let map = guard.get::<DBKey>().expect("db");
+    let conn = map.get().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT COUNT(id) FROM invitations WHERE contest = ?")
+        .unwrap();
+    let vals = stmt.query_map(params![contest.id], |row| Ok(Counter { value: row.get(0)? }))
+        .unwrap()
+        .map(|count| count.unwrap_or(Counter{value: -1}).value).collect::<Vec<i64>>();
+    if vals.is_empty() {
+        return 0;
+    }
+    vals[0]
 }
 
 // Function to call to verify that the joined users are still in the channel
