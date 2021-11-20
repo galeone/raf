@@ -1,0 +1,31 @@
+[package]
+authors = ["Paolo Galeone <nessuno@nerdz.eu>"]
+edition = "2018"
+name = "raf"
+version = "0.1.0"
+[dependencies]
+chrono = "0.4.19"
+data-encoding = "2.3.2"
+default = "0.1.2"
+hyper = "0.14.10"
+hyper-tls = "0.5.0"
+log = "0.4.14"
+r2d2 = "0.8.9"
+r2d2_sqlite = "0.18"
+regex = "1.5.4"
+simple_logger = "1.11.0"
+tabular = "*"
+typemap = "0.3.3"
+url = "2.2.2"
+
+[dependencies.rusqlite]
+features = ["chrono"]
+version = "0.25"
+
+[dependencies.telexide]
+branch = "master"
+git = "https://github.com/galeone/telexide"
+
+[dependencies.tokio]
+features = ["full"]
+version = "1.8.0"
