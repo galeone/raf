@@ -38,7 +38,8 @@ use crate::telegram::messages::{
 use crate::telegram::users;
 
 /// Callback function invoked every time Telegram sends a callback message.
-/// It implements the FSM for the contests management.
+/// It implements the FSM for the contests management. It alwasy refers to a chan.
+/// In fact, the variable `chan_id` in the code is always defined.
 ///
 /// # Arguments
 /// * `ctx` - Telexide context
@@ -165,6 +166,15 @@ pub async fn callback(ctx: Context, update: Update) {
         if res.is_err() {
             error!("[callback handler] {}", res.err().unwrap());
         }
+        return;
+    }
+
+    // always check for the bot being administrato of the chan
+    // identified by chat_id.
+    // In case of errors, admins sends a message to the user
+    // and this list is empty.
+    let admins = channels::admins(&ctx, chan_id, sender_id).await;
+    if admins.is_empty() {
         return;
     }
 
