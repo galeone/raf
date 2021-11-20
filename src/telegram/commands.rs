@@ -4,10 +4,14 @@ use rusqlite::params;
 use std::collections::HashMap;
 use telexide::framework::{CommandError, CommandResult};
 use telexide::model::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyMarkup};
-use telexide::{api::types::*, prelude::*};
+use telexide::{api::types::SendMessage, prelude::*};
 
-use crate::persistence::types::*;
-use crate::telegram::{channels, contests, messages::*, users};
+use crate::persistence::types::{Channel, DBKey, NameKey, RankContest};
+use crate::telegram::{
+    channels, contests,
+    messages::{display_main_commands, escape_markdown},
+    users,
+};
 
 #[command(description = "Your rank in the challenges you joined")]
 pub async fn rank(ctx: Context, message: Message) -> CommandResult {
@@ -35,7 +39,7 @@ pub async fn rank(ctx: Context, message: Message) -> CommandResult {
             .unwrap()
             .peekable();
         if iter.peek().is_some() && iter.peek().unwrap().is_ok() {
-            iter.map(|rank_contest| rank_contest.unwrap())
+            iter.map(std::result::Result::unwrap)
                 .collect::<Vec<RankContest>>()
         } else {
             vec![]
@@ -51,9 +55,9 @@ pub async fn rank(ctx: Context, message: Message) -> CommandResult {
             let rank = rank_contest.rank;
             m += &format!("Contest \"{}({})\": ", c.name, c.end);
             if rank == 1 {
-                m += "🥇#1!";
+                m += "\u{1f947}#1!";
             } else if rank <= 3 {
-                m += &format!("🏆 #{}", rank);
+                m += &format!("\u{1f3c6} #{}", rank);
             } else {
                 m += &format!("#{}", rank);
             }
@@ -235,7 +239,7 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                     })
                 })
                 .unwrap()
-                .map(|chan| chan.unwrap())
+                .map(std::result::Result::unwrap)
                 .next();
 
             let user = users::get(&ctx, source);
@@ -283,10 +287,10 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
 
             let inline_keyboard = vec![vec![
                 InlineKeyboardButton {
-                    text: "Accept ✅".to_owned(),
+                    text: "Accept \u{2705}".to_owned(),
                     // tick, source, dest, chan
                     callback_data: Some(format!(
-                        "✅ {} {} {} {}",
+                        "\u{2705} {} {} {} {}",
                         user.id,
                         message.from.clone().unwrap().id,
                         channel.id,
@@ -300,8 +304,8 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                     url: None,
                 },
                 InlineKeyboardButton {
-                    text: "Refuse ❌".to_owned(),
-                    callback_data: Some("❌".to_string()),
+                    text: "Refuse \u{274c}".to_owned(),
+                    callback_data: Some("\u{274c}".to_string()),
                     callback_game: None,
                     login_url: None,
                     pay: None,
@@ -347,7 +351,7 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                 &format!(
                     "Thank you for joining the {contest_name} contest!\n\
             Here's the link to use for inviting your friends to join {chan_name}:\n\n\
-            👉🏻{invite_link}",
+            \u{1f449}\u{1f3fb}{invite_link}",
                     contest_name = c.name,
                     chan_name = chan.name,
                     invite_link = invite_link

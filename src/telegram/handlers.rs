@@ -7,14 +7,20 @@ use telexide::model::{
     Chat, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyMarkup,
     UpdateContent,
 };
-use telexide::{api::types::*, prelude::*};
+use telexide::{
+    api::types::{AnswerCallbackQuery, GetChatMember, PinChatMessage, SendMessage},
+    prelude::*,
+};
 use tokio::time::{sleep, Duration};
 
-use crate::persistence::types::*;
+use crate::persistence::types::{Channel, Contest, DBKey, NameKey, User};
 use crate::telegram::channels;
 use crate::telegram::commands::start;
 use crate::telegram::contests;
-use crate::telegram::messages::*;
+use crate::telegram::messages::{
+    delete_parent_message, display_main_commands, display_manage_menu, escape_markdown,
+    remove_loading_icon,
+};
 use crate::telegram::users;
 
 #[prepare_listener]
@@ -164,7 +170,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 })
             })
             .unwrap()
-            .map(|chan| chan.unwrap())
+            .map(std::result::Result::unwrap)
             .next()
             .unwrap();
         Some(channel)
@@ -243,7 +249,7 @@ pub async fn callback(ctx: Context, update: Update) {
             error!("[callback handler] {}", res.err().unwrap());
         }
         let text = format!(
-            "Please join 👉 [{}]({}) within the next 10 seconds\\.",
+            "Please join \u{1f449} [{}]({}) within the next 10 seconds\\.",
             escape_markdown(&chan.name.to_string(), None),
             chan.link
         );
@@ -334,7 +340,7 @@ pub async fn callback(ctx: Context, update: Update) {
                         }
                     } else {
                         let text = format!(
-                            "You joined [{}]({}) 🤗",
+                            "You joined [{}]({}) \u{1f917}",
                             escape_markdown(&chan.name.to_string(), None),
                             chan.link
                         );
@@ -502,16 +508,16 @@ pub async fn callback(ctx: Context, update: Update) {
             let rank = contests::ranking(&ctx, &c);
             if !rank.is_empty() {
                 // Send top-10 to the channel and pin the message
-                let mut m = format!("🏆 Contest ({}) finished 🏆\n\n\n", c.name);
+                let mut m = format!("\u{1f3c6} Contest ({}) finished \u{1f3c6}\n\n\n", c.name);
                 let winner = rank[0].user.clone();
                 for row in rank {
                     let user = row.user;
                     let rank = row.rank;
                     let invites = row.invites;
                     if rank == 1 {
-                        m += "🥇#1!";
+                        m += "\u{1f947}#1!";
                     } else if rank <= 3 {
-                        m += &format!("🏆 #{}", rank);
+                        m += &format!("\u{1f3c6} #{}", rank);
                     } else {
                         m += &format!("#{}", rank);
                     }
@@ -531,7 +537,7 @@ pub async fn callback(ctx: Context, update: Update) {
                     );
                 }
                 m += &format!(
-                    "\n\nThe prize ({}) is being delivered to our champion 🥇. Congratulations!!",
+                    "\n\nThe prize ({}) is being delivered to our champion \u{1f947}. Congratulations!!",
                     c.prize
                 );
 
@@ -637,7 +643,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 For example a valid message is (note the GMT+1 timezone written as +01):\n\n\
                 {month_string} {year}\n\
                 {year}-{month}-28 20:00 +01\n\
-                Amazon 50€ Gift Card\n",
+                Amazon 50\u{20ac} Gift Card\n",
                     year = now.format("%Y"),
                     month = now.format("%m"),
                     month_string = now.format("%B")
@@ -893,7 +899,7 @@ pub async fn callback(ctx: Context, update: Update) {
                     "{title}\n\n{rules}\n\n{bot_link}",
                     title = escape_markdown(
                         &format!(
-                            "🔥{name} contest 🔥\nWho invites more friends wins a {prize}!",
+                            "\u{1f525}{name} contest \u{1f525}\nWho invites more friends wins a {prize}!",
                             prize = c.prize,
                             name = c.name
                         ),

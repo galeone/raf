@@ -70,6 +70,7 @@ COMMIT;";
 /// "raf.db" and it's always in the current working directory of the application.
 ///
 /// Foreign keys are enabled in the SQLite instance.
+#[must_use]
 pub fn connection() -> r2d2::Pool<SqliteConnectionManager> {
     let manager = SqliteConnectionManager::file("raf.db")
         .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));

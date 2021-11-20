@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use log::error;
 use rusqlite::params;
-use telexide::{api::types::*, prelude::*};
+use telexide::{api::types::GetChatMember, prelude::*};
 
-use crate::persistence::types::*;
+use crate::persistence::types::{Contest, DBKey, Rank};
 use crate::telegram::users;
 
 use std::string::ToString;
@@ -60,11 +60,12 @@ pub fn get_all(ctx: &Context, chan: i64) -> Vec<Contest> {
             })
         })
         .unwrap()
-        .map(|contest| contest.unwrap())
+        .map(std::result::Result::unwrap)
         .collect();
     contests
 }
 
+#[must_use]
 pub fn ranking(ctx: &Context, contest: &Contest) -> Vec<Rank> {
     let guard = ctx.data.read();
     let map = guard.get::<DBKey>().expect("db");
@@ -85,7 +86,7 @@ pub fn ranking(ctx: &Context, contest: &Contest) -> Vec<Rank> {
         })
     })
     .unwrap()
-    .map(|rank_contest| rank_contest.unwrap())
+    .map(std::result::Result::unwrap)
     .collect::<Vec<Rank>>()
 }
 
@@ -178,6 +179,7 @@ pub fn from_text(text: &str, chan: i64) -> Result<Contest, Error> {
 ///
 /// * `ctx`: The telexide ctx, used to get the db
 /// * `contest`: The Contest under examination
+#[must_use]
 pub fn count_users(ctx: &Context, contest: &Contest) -> i64 {
     struct Counter {
         value: i64,
