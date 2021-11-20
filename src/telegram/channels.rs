@@ -8,8 +8,16 @@ use telexide::{
 
 use crate::persistence::types::{Channel, DBKey};
 
+/// Returns all the channels owned by `user_id`.
+///
+/// # Arguments:
+/// * `ctx` - Telexide `Context`
+/// * `user_id` - The user ID
+///
+/// # Panics
+/// Panics if the connection to the DB fails, or if the returned data is corrupt.
 #[must_use]
-pub fn get(ctx: &Context, user_id: i64) -> Vec<Channel> {
+pub fn get_all(ctx: &Context, user_id: i64) -> Vec<Channel> {
     let guard = ctx.data.read();
     let map = guard.get::<DBKey>().expect("db");
     let conn = map.get().unwrap();
@@ -32,6 +40,22 @@ pub fn get(ctx: &Context, user_id: i64) -> Vec<Channel> {
     channels
 }
 
+/// Tries to register a chat identified by its `chat_id`. The chat can be
+/// - a channel
+/// - a group
+/// - a supergroup
+///
+/// Returns true in case of registration success.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `chat_id` - Unique identifier of the chat
+/// * `registered_by` - Unique identifier of the `User` (`user.id`) that wants to register the
+/// chat.
+///
+/// # Panics
+///
+/// Panics if the commincation with telegram fails, or if the database is failing.
 pub async fn try_register(ctx: &Context, chat_id: i64, registered_by: i64) -> bool {
     // NOTE: we need this get_chat call because chat.invite_link is returned only by
     // calling GetChat: https://core.telegram.org/bots/api#chat

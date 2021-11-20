@@ -18,18 +18,27 @@ use crate::telegram::channels;
 use crate::telegram::commands::start;
 use crate::telegram::contests;
 use crate::telegram::messages::{
-    delete_parent_message, display_main_commands, display_manage_menu, escape_markdown,
+    delete_message, display_main_commands, display_manage_menu, escape_markdown,
     remove_loading_icon,
 };
 use crate::telegram::users;
 
+/// Callback function invoked every time Telegram sends a callback message.
+/// It implements the FSM for the contests management.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `update` - The update message received
+///
+/// # Panics
+/// Panics if the connection to the DB fails or if telegram returns an error.
 #[prepare_listener]
 pub async fn callback(ctx: Context, update: Update) {
     let callback = match update.content {
         UpdateContent::CallbackQuery(ref q) => q,
         _ => return,
     };
-    let parent_message = callback.message.as_ref().map(|message| message.message_id);
+    let parent_message = callback.message.clone().unwrap().message_id;
     let chat_id = callback.message.clone().unwrap().chat.get_id();
     let sender_id = callback.from.id;
 
@@ -146,7 +155,7 @@ pub async fn callback(ctx: Context, update: Update) {
     }
 
     if main {
-        delete_parent_message(&ctx, chat_id, parent_message).await;
+        delete_message(&ctx, chat_id, parent_message).await;
         display_main_commands(&ctx, sender_id).await;
         return;
     }
@@ -355,13 +364,13 @@ pub async fn callback(ctx: Context, update: Update) {
                 error!("[not join] {}", err);
             }
         }
-        delete_parent_message(&ctx, chat_id, parent_message).await;
+        delete_message(&ctx, chat_id, parent_message).await;
     }
 
     if manage {
         remove_loading_icon(&ctx, &callback.id, None).await;
         display_manage_menu(&ctx, chat_id, &chan).await;
-        delete_parent_message(&ctx, chat_id, parent_message).await;
+        delete_message(&ctx, chat_id, parent_message).await;
     }
 
     if start {
@@ -413,7 +422,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 error!("[start send] {}", err);
             }
             remove_loading_icon(&ctx, &callback.id, None).await;
-            delete_parent_message(&ctx, chat_id, parent_message).await;
+            delete_message(&ctx, chat_id, parent_message).await;
         };
     }
 
@@ -463,7 +472,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 error!("[create send]  {}", err);
             }
             remove_loading_icon(&ctx, &callback.id, None).await;
-            delete_parent_message(&ctx, chat_id, parent_message).await;
+            delete_message(&ctx, chat_id, parent_message).await;
         };
     }
 
@@ -478,7 +487,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 error!("[stop send] {}", err);
             }
             display_manage_menu(&ctx, chat_id, &chan).await;
-            delete_parent_message(&ctx, chat_id, parent_message).await;
+            delete_message(&ctx, chat_id, parent_message).await;
         } else {
             contests::validate_users(&ctx, &c).await;
 
@@ -518,7 +527,7 @@ pub async fn callback(ctx: Context, update: Update) {
                     error!("[stop send] {}", err);
                 }
                 display_manage_menu(&ctx, chat_id, &chan).await;
-                delete_parent_message(&ctx, chat_id, parent_message).await;
+                delete_message(&ctx, chat_id, parent_message).await;
             } else {
                 // Send top-10 to the channel and pin the message
                 let mut m = format!("\u{1f3c6} Contest ({}) finished \u{1f3c6}\n\n\n", c.name);
@@ -677,7 +686,7 @@ pub async fn callback(ctx: Context, update: Update) {
         }
 
         remove_loading_icon(&ctx, &callback.id, None).await;
-        delete_parent_message(&ctx, chat_id, parent_message).await;
+        delete_message(&ctx, chat_id, parent_message).await;
     }
 
     if delete {
@@ -726,7 +735,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 error!("[create send] {}", err);
             }
             remove_loading_icon(&ctx, &callback.id, None).await;
-            delete_parent_message(&ctx, chat_id, parent_message).await;
+            delete_message(&ctx, chat_id, parent_message).await;
         };
     }
 
@@ -797,7 +806,7 @@ pub async fn callback(ctx: Context, update: Update) {
             remove_loading_icon(&ctx, &callback.id, None).await;
 
             display_manage_menu(&ctx, chat_id, &chan).await;
-            delete_parent_message(&ctx, chat_id, parent_message).await;
+            delete_message(&ctx, chat_id, parent_message).await;
         }
     }
 
@@ -827,7 +836,7 @@ pub async fn callback(ctx: Context, update: Update) {
 
         remove_loading_icon(&ctx, &callback.id, None).await;
         display_manage_menu(&ctx, chat_id, &chan).await;
-        delete_parent_message(&ctx, chat_id, parent_message).await;
+        delete_message(&ctx, chat_id, parent_message).await;
     }
 
     if start_contest {
@@ -964,10 +973,21 @@ pub async fn callback(ctx: Context, update: Update) {
 
         remove_loading_icon(&ctx, &callback.id, None).await;
         display_manage_menu(&ctx, chat_id, &chan).await;
-        delete_parent_message(&ctx, chat_id, parent_message).await;
+        delete_message(&ctx, chat_id, parent_message).await;
     }
 }
 
+/// Callback function invoked every time an user send a text message to RaF.
+/// It handles the behavior of the BoT in groups or when an owners is creating a context.
+/// Also manages the final stage, when the owner is contacting a winner that has no username,
+/// trough RaF.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `update` - The update message received
+///
+/// # Panics
+/// Panics if the connection to the DB fails or if telegram returns an error.
 #[prepare_listener]
 pub async fn message(ctx: Context, update: Update) {
     info!("message handler begin");
@@ -982,18 +1002,15 @@ pub async fn message(ctx: Context, update: Update) {
     // For (super)groups we need to have the bot inside the (super)group and receive
     // a message.
     let chat_id: Option<i64> = {
-        if let Some(forward_data) = &message.forward_data {
-            if let Some(from_chat) = &forward_data.from_chat {
-                match from_chat {
+        message.forward_data.as_ref().and_then(|forward_data| {
+            forward_data
+                .from_chat
+                .as_ref()
+                .and_then(|from_chat| match from_chat {
                     Chat::Channel(c) => Some(c.id),
                     _ => None,
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+                })
+        })
     };
 
     let registration_flow = chat_id.is_some();
@@ -1071,7 +1088,7 @@ pub async fn message(ctx: Context, update: Update) {
         // prize
         // ```
         if text.split('\n').skip_while(|r| r.is_empty()).count() == 3 {
-            let channels = channels::get(&ctx, sender_id); // channels registered by the user
+            let channels = channels::get_all(&ctx, sender_id); // channels registered by the user
             let chan = {
                 let guard = ctx.data.read();
                 let map = guard.get::<DBKey>().expect("db");

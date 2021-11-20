@@ -13,6 +13,14 @@ use crate::telegram::{
     users,
 };
 
+/// Rank command. Shows to the user his/her rank for every joined challenge.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the command inside
+///
+/// # Panics
+/// Panics if the connection to the db fails, or if telegram servers return error.
 #[command(description = "Your rank in the challenges you joined")]
 pub async fn rank(ctx: Context, message: Message) -> CommandResult {
     info!("rank command begin");
@@ -78,6 +86,11 @@ pub async fn rank(ctx: Context, message: Message) -> CommandResult {
     Ok(())
 }
 
+/// Help command. Shows to the user the help menu with the complete command list.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the command inside
 #[command(description = "Help menu")]
 pub async fn help(ctx: Context, message: Message) -> CommandResult {
     info!("help command begin");
@@ -104,11 +117,19 @@ pub async fn help(ctx: Context, message: Message) -> CommandResult {
     Ok(())
 }
 
+/// Contest command. Start/Manage the referral contest.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the commands inside
+///
+/// # Panics
+/// Panics if the connection to the db fails, or if telegram servers return error.
 #[command(description = "Start/Manage the referral contest")]
 pub async fn contest(ctx: Context, message: Message) -> CommandResult {
     info!("contest command begin");
     let sender_id = message.from.clone().unwrap().id;
-    let channels = channels::get(&ctx, sender_id);
+    let channels = channels::get_all(&ctx, sender_id);
 
     if channels.is_empty() {
         let reply = SendMessage::new(sender_id, "You have no registered groups/channels!");
@@ -159,6 +180,22 @@ pub async fn contest(ctx: Context, message: Message) -> CommandResult {
     Ok(())
 }
 
+/// Start command. Depending on the `message` content executes different actions.
+/// In any case, it adds the users to the list of the known users.
+///
+/// - If the message contains only `/start` it starts the bot with an hello message.
+/// - If the message contains the base64 encoded parameters: user, channel, contest
+/// this is an invitation link from user, to join the channel, because of contest.
+/// - If the message contains the base64 encoded parameters: channel, contest
+/// this is the link `RaF` generated and posted to the channel, that ever partecipant uses to
+/// generate its own referral link.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the commands inside
+///
+/// # Panics
+/// Panics if the connection to the db fails, or if telegram servers return error.
 #[command(description = "Start the Bot")]
 pub async fn start(ctx: Context, message: Message) -> CommandResult {
     info!("start command begin");
@@ -386,6 +423,14 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
     Ok(())
 }
 
+/// Register command. Shows to the user the procedure to register a channel/group to `RaF`.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the commands inside
+///
+/// # Panics
+/// If telegram servers return error.
 #[command(description = "Register your group/channel to the bot")]
 pub async fn register(ctx: Context, message: Message) -> CommandResult {
     info!("register command begin");
@@ -407,12 +452,20 @@ pub async fn register(ctx: Context, message: Message) -> CommandResult {
     Ok(())
 }
 
-#[command(description = "List your registered channels")]
+/// List command. Shows to the user the channels/groups registered
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the commands inside
+///
+/// # Panics
+/// Panics if the connection to the db fails, or if telegram servers return error.
+#[command(description = "List your registered channels/groups")]
 pub async fn list(ctx: Context, message: Message) -> CommandResult {
     info!("list command begin");
     let sender_id = message.from.clone().unwrap().id;
     let text = {
-        let channels = channels::get(&ctx, sender_id);
+        let channels = channels::get_all(&ctx, sender_id);
 
         let mut text: String = "".to_owned();
         for (i, chan) in channels.iter().enumerate() {

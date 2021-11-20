@@ -7,7 +7,16 @@ use telexide::{
 
 use crate::persistence::types::Channel;
 
-pub async fn display_main_commands(ctx: &Context, sender_id: i64) {
+/// Sends to the `chat_id` the list of the commands.
+/// Used to show a raw menu to the user after the execution of any command.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `chat_id` - The chat ID.
+///
+/// # Panics
+/// Panics if Telegram returns a error.
+pub async fn display_main_commands(ctx: &Context, chat_id: i64) {
     let text = escape_markdown(
         "What do you want to do?\n\
         /register - Register a channel to the bot\n\
@@ -16,7 +25,7 @@ pub async fn display_main_commands(ctx: &Context, sender_id: i64) {
         /rank - Your rank in the challenges you joined\n",
         None,
     );
-    let mut reply = SendMessage::new(sender_id, &text);
+    let mut reply = SendMessage::new(chat_id, &text);
     reply.set_parse_mode(&ParseMode::MarkdownV2);
     let res = ctx.api.send_message(reply).await;
     if res.is_err() {
@@ -25,6 +34,17 @@ pub async fn display_main_commands(ctx: &Context, sender_id: i64) {
     }
 }
 
+/// Escape the input `text` to support Telegram Markdown V2.
+/// Depending on the `entity_type` changes the rules. If in `pre`,`code` or `text_link`
+/// there's only a small subset of characters to escape, otherwise the default pattern escapes
+/// almost every non ASCII character.
+///
+/// # Arguments
+/// * `text`: The string slice containing the text to escape
+/// * `entity_type`: Optional entity type (`pre`, `code` or `text_link`).
+///
+/// # Panics
+/// It panics if the regex used for the escape fails to be built.
 #[must_use]
 pub fn escape_markdown(text: &str, entity_type: Option<&str>) -> String {
     let mut pattern = r#"'_*[]()~`>#+-=|{}.!"#;
@@ -40,20 +60,37 @@ pub fn escape_markdown(text: &str, entity_type: Option<&str>) -> String {
     return re.replace_all(text, r#"\$1"#).to_string();
 }
 
-pub async fn delete_parent_message(ctx: &Context, chat_id: i64, parent_message: Option<i64>) {
-    if let Some(parent_id) = parent_message {
-        let res = ctx
-            .api
-            .delete_message(DeleteMessage::new(chat_id, parent_id))
-            .await;
+/// Deletes a message with `message_id` from `chat_id`.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `chat_id` - The chat ID.
+/// * `message_id` - The ID of the message to delete.
+///
+/// # Panics
+/// Panics if Telegram returns a error.
+pub async fn delete_message(ctx: &Context, chat_id: i64, message_id: i64) {
+    let res = ctx
+        .api
+        .delete_message(DeleteMessage::new(chat_id, message_id))
+        .await;
 
-        if res.is_err() {
-            let err = res.err().unwrap();
-            error!("[delete parent message] {}", err);
-        }
+    if res.is_err() {
+        let err = res.err().unwrap();
+        error!("[delete parent message] {}", err);
     }
 }
 
+/// Display the manage manu (grid of buttons), to use when the user is
+/// creating/managing contests.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `chat_id` - The chat ID.
+/// * `chan` - The channel that's being managed.
+///
+/// # Panics
+/// Panics if Telegram returns a error.
 pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
     let mut reply = SendMessage::new(
         chat_id,
@@ -142,6 +179,15 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
     }
 }
 
+/// Removes the loading icon added by telegram to the user-clicked button.
+///
+/// # Arguments
+/// * `ctx` - Telexide contest
+/// * `callback_id` - The ID that generated the loading icon to be added
+/// * `text`  - Optional text to show, in an alert, if present.
+///
+/// # Panics
+/// Panics of Telegram returns an error.
 pub async fn remove_loading_icon(ctx: &Context, callback_id: &str, text: Option<&str>) {
     let res = ctx
         .api

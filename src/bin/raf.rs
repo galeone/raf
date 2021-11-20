@@ -13,7 +13,7 @@ use raf::telegram::commands::*;
 use raf::telegram::handlers;
 
 #[tokio::main]
-async fn main() -> telexide::Result<()> {
+async fn main() {
     SimpleLogger::new()
         .with_level(LevelFilter::Info)
         .init()
@@ -52,5 +52,4 @@ async fn main() -> telexide::Result<()> {
             }
         }
     }
-    Ok(())
 }

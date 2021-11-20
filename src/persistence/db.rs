@@ -3,12 +3,12 @@ use r2d2_sqlite::SqliteConnectionManager;
 /// Database schema definition. Transaction executed everytime a new connection
 /// pool is requrested (usually, once at the application startup).
 ///
-/// being_managed_channels, as the name suggests, is the channel that the owner (
-/// hence channels.registered_by == owner) is managing.
+/// `being_managed_channels`, as the name suggests, is the channel that the owner (
+/// hence `channels.registered_by` == owner) is managing.
 ///
 /// NOTE: `being_contacted_users` and `being_managed_channels` are tables required because
 /// there are moments in the flow, where the user should send "complex" messages, but these
-/// "complex" messages are outside the FSM created by the "callback_handler"
+/// "complex" messages are outside the FSM created by the `callback_handler`
 /// (FSM created naturally because all the callbacks invokes the same method).
 const SCHEMA: &str = "BEGIN;
 CREATE TABLE IF NOT EXISTS users (
@@ -66,10 +66,13 @@ CREATE TABLE IF NOT EXISTS being_contacted_users(
 );
 COMMIT;";
 
-/// Creates a connection pool to the SQLite database, whose name is alwasy
+/// Creates a connection pool to the `SQLite` database, whose name is alwasy
 /// "raf.db" and it's always in the current working directory of the application.
 ///
-/// Foreign keys are enabled in the SQLite instance.
+/// Foreign keys are enabled in the `SQLite` instance.
+///
+/// # Panics
+/// Panics if the connection with the db fails.
 #[must_use]
 pub fn connection() -> r2d2::Pool<SqliteConnectionManager> {
     let manager = SqliteConnectionManager::file("raf.db")

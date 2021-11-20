@@ -8,6 +8,14 @@ use crate::telegram::users;
 
 use std::string::ToString;
 
+/// Returns the `Contest` with the specified `id`, if exists.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `id` - The ID (`RaF` generated) of the contest to search.
+///
+/// # Panics
+/// Panics if the connection to the DB fails, or if the returned data is corrupt.
 #[must_use]
 pub fn get(ctx: &Context, id: i64) -> Option<Contest> {
     let guard = ctx.data.read();
@@ -36,6 +44,14 @@ pub fn get(ctx: &Context, id: i64) -> Option<Contest> {
     None
 }
 
+/// Returns all the `Contest` created for the channel with ID `id`.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `chan` - The ID (Telegram generated) of the Channel.
+///
+/// # Panics
+/// Panics if the connection to the DB fails, or if the returned data is corrupt.
 #[must_use]
 pub fn get_all(ctx: &Context, chan: i64) -> Vec<Contest> {
     let guard = ctx.data.read();
@@ -65,6 +81,15 @@ pub fn get_all(ctx: &Context, chan: i64) -> Vec<Contest> {
     contests
 }
 
+/// Returns rank for the `contest`, already oredered by number of invites accepted in descending
+/// order.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `contest` - The `Contest` under examination
+///
+/// # Panics
+/// Panics if the connection to the DB fails, or if the returned data is corrupt.
 #[must_use]
 pub fn ranking(ctx: &Context, contest: &Contest) -> Vec<Rank> {
     let guard = ctx.data.read();
@@ -129,6 +154,12 @@ impl std::fmt::Display for Error {
 ///
 /// * `text` - A string slice holding the user inserted text
 /// * `chan` - The channel to associate with the Contest in case of success
+///
+/// # Errors
+/// If the parsing from text fails for whatever reason, it returns an `Error`
+/// that contains a detail. In case of failed parsing, it's a `Error::ParseError(e)`
+/// otherwise is a `Error::GenericError(s)` with a string containing the reason
+/// of the failure.
 pub fn from_text(text: &str, chan: i64) -> Result<Contest, Error> {
     let rows = text
         .split('\n')
@@ -179,6 +210,9 @@ pub fn from_text(text: &str, chan: i64) -> Result<Contest, Error> {
 ///
 /// * `ctx`: The telexide ctx, used to get the db
 /// * `contest`: The Contest under examination
+///
+/// # Panics
+/// Panics if the connection to the DB fails, or if the returned data is corrupt.
 #[must_use]
 pub fn count_users(ctx: &Context, contest: &Contest) -> i64 {
     struct Counter {
@@ -210,6 +244,9 @@ pub fn count_users(ctx: &Context, contest: &Contest) -> i64 {
 /// # Arguments
 /// * `ctx`: The telexide ctx, used to get the db
 /// * `contest`: The Contest under examination
+///
+/// # Panics
+/// Panics if the connection to the DB fails, or if the returned data is corrupt.
 pub async fn validate_users(ctx: &Context, contest: &Contest) {
     struct InnerUser {
         id: i64,

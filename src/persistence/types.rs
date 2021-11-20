@@ -101,8 +101,8 @@ impl Key for DBKey {
     type Value = r2d2::Pool<SqliteConnectionManager>;
 }
 
-/// Uniqye type for a `typemap::Key` used to fetch from the telexde context
-/// the BotName, without accessing in this way to the `env`.
+/// Uniqye type for a `typemap::Key` used to fetch from the telexide context
+/// the bot name, without accessing in this way to the `env`.
 pub struct NameKey;
 impl Key for NameKey {
     type Value = String;
