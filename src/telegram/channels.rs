@@ -16,7 +16,7 @@ use log::{error, info};
 use rusqlite::params;
 use telexide::{
     api::types::{CreateChatInviteLink, GetChat, GetChatAdministrators, SendMessage},
-    model::{Chat, ChatMember},
+    model::{AdministratorMemberStatus, Chat, ChatMember},
     prelude::*,
 };
 
@@ -54,6 +54,49 @@ pub fn get_all(ctx: &Context, user_id: i64) -> Vec<Channel> {
     channels
 }
 
+/// Returns all the admins of the `chat_id`. In case of errors sends a message to the `user_id`
+/// and logs with `error!`.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `chat_id` - The unique id of the group/chan under examination
+/// * `user_id` - The user that requested this admin list.
+///
+/// # Panics
+/// Panics if the Telegram server returns error.
+pub async fn admins(ctx: &Context, chat_id: i64, user_id: i64) -> Vec<AdministratorMemberStatus> {
+    let admins = ctx
+        .api
+        .get_chat_administrators(GetChatAdministrators { chat_id })
+        .await;
+    if admins.is_err() {
+        let res = ctx
+            .api
+            .send_message(SendMessage::new(
+                user_id,
+                "Error! You must add this bot as admin of the group/channel.",
+            ))
+            .await;
+        if res.is_err() {
+            let err = res.err().unwrap();
+            error!("[register] send message {}", err);
+        }
+        return vec![];
+    }
+    let admins = admins.unwrap();
+
+    admins
+        .iter()
+        .filter_map(|u| {
+            if let ChatMember::Administrator(admin) = u {
+                Some(admin.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Tries to register a chat identified by its `chat_id`. The chat can be
 /// - a channel
 /// - a group
@@ -76,18 +119,9 @@ pub async fn try_register(ctx: &Context, chat_id: i64, registered_by: i64) -> bo
     info!("try_register begin");
     let (mut invite_link, username, title, is_channel) = {
         match ctx.api.get_chat(GetChat { chat_id }).await.unwrap() {
-            Chat::Channel(c) => {
-                info!("Registering a channel");
-                (c.invite_link, c.username, Some(c.title), true)
-            }
-            Chat::Group(c) => {
-                info!("Registering a group");
-                (c.invite_link, c.username, Some(c.title), false)
-            }
-            Chat::SuperGroup(c) => {
-                info!("Registering a supergroup");
-                (c.invite_link, c.username, Some(c.title), false)
-            }
+            Chat::Channel(c) => (c.invite_link, c.username, Some(c.title), true),
+            Chat::Group(c) => (c.invite_link, c.username, Some(c.title), false),
+            Chat::SuperGroup(c) => (c.invite_link, c.username, Some(c.title), false),
             Chat::Private(_) => (None, None, None, false),
         }
     };
@@ -128,43 +162,23 @@ pub async fn try_register(ctx: &Context, chat_id: i64, registered_by: i64) -> bo
         return false;
     }
 
-    let admins = ctx
-        .api
-        .get_chat_administrators(GetChatAdministrators { chat_id })
-        .await;
-    if admins.is_err() {
-        let res = ctx
-            .api
-            .send_message(SendMessage::new(
-                registered_by,
-                "Error! You must add this bot as admin of the group/channel.",
-            ))
-            .await;
-        if res.is_err() {
-            let err = res.err().unwrap();
-            error!("[register] send message {}", err);
-        }
-        return false;
-    }
-    let admins = admins.unwrap();
-    let me = ctx.api.get_me().await.unwrap();
+    let admins = admins(ctx, chat_id, registered_by).await;
     let mut found = false;
+    let me = ctx.api.get_me().await.unwrap(); // the bot!
     for admin in admins {
         // permissions in channel and groups are a bit different
-        if let ChatMember::Administrator(admin) = admin {
-            if admin.user.is_bot
-                && admin.user.id == me.id
-                && admin.can_manage_chat
-                && ((is_channel
-                    && admin.can_post_messages.is_some()
-                    && admin.can_post_messages.unwrap())
-                    || (!is_channel
-                        && admin.can_pin_messages.is_some()
-                        && admin.can_pin_messages.unwrap()))
-            {
-                found = true;
-                break;
-            }
+        if admin.user.is_bot
+            && admin.user.id == me.id
+            && admin.can_manage_chat
+            && ((is_channel
+                && admin.can_post_messages.is_some()
+                && admin.can_post_messages.unwrap())
+                || (!is_channel
+                    && admin.can_pin_messages.is_some()
+                    && admin.can_pin_messages.unwrap()))
+        {
+            found = true;
+            break;
         }
     }
 
