@@ -1,8 +1,8 @@
 # Telegram RaF \[Refer a Friend\]([@RefafBot](https://t.me/RefafBot))
 
-Telegram Bot for creating referral-based contests for your channels.
+RaF is a bot for creating referral-based contests for your Telegram channels, groups and supergroups.
 
-Create contests, let your users share your channel, increase your audience, and give prizes to the winners!
+Create contests, let your users share their link to your channel/group, increase your audience, and give prizes to the winners!
 
 ---
 
