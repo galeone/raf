@@ -19,7 +19,7 @@ use crate::persistence::types::Channel;
 pub async fn display_main_commands(ctx: &Context, chat_id: i64) {
     let text = escape_markdown(
         "What do you want to do?\n\
-        /register - Register a channel to the bot\n\
+        /register - Register a channel/group to the bot\n\
         /list - List your registered groups/channels\n\
         /contest - Start/Manage the referral contest\n\
         /rank - Your rank in the challenges you joined\n",

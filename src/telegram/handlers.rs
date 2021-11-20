@@ -647,7 +647,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 &format!(
                     "Write a single message with every required info on a new line\n\n\
                 Contest name\n\
-                End date (YYY-MM-DD hh:mm TZ)\n\
+                End date (YYYY-MM-DD hh:mm TZ)\n\
                 Prize\n\n\
                 For example a valid message is (note the GMT+1 timezone written as +01):\n\n\
                 {month_string} {year}\n\

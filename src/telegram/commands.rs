@@ -99,7 +99,7 @@ pub async fn help(ctx: Context, message: Message) -> CommandResult {
         "I can create contests based on the referral strategy. \
         The user that referes more (legit) users will win a prize!\n\n\
         You can control me by sending these commands:\n\n\
-        /register - Register a group/channel to the bot\n\
+        /register - Register a channel/group to the bot\n\
         /list - List your registered groups/channels\n\
         /contest - Start/Manage the referral contest\n\
         /rank - Your rank in the challenges you joined\n\
