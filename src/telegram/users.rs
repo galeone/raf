@@ -1,7 +1,16 @@
-use crate::persistence::types::{DBKey, User};
 use rusqlite::params;
 use telexide::prelude::*;
 
+use crate::persistence::types::{DBKey, User};
+
+/// Returns the `User` with the specified `id`, if any.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `id` - The user ud
+///
+/// # Panics
+/// Panics if the connection to the db fails.
 #[must_use]
 pub fn get(ctx: &Context, id: i64) -> Option<User> {
     let guard = ctx.data.read();
@@ -29,6 +38,13 @@ pub fn get(ctx: &Context, id: i64) -> Option<User> {
     None
 }
 
+/// Returns the complete list of owners. Owners are the users who registered a channel/group.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+///
+/// # Panics
+/// Panics if the connection to the db fails.
 #[must_use]
 pub fn owners(ctx: &Context) -> Vec<User> {
     let guard = ctx.data.read();
@@ -36,7 +52,7 @@ pub fn owners(ctx: &Context) -> Vec<User> {
     let conn = map.get().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT users.id, users.first_name, users.last_name, users.username \
+            "SELECT DISTINCT users.id, users.first_name, users.last_name, users.username \
         FROM users INNER JOIN channels ON users.id = channels.registered_by \
         ORDER BY users.id",
         )
