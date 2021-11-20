@@ -272,17 +272,7 @@ pub async fn callback(ctx: Context, update: Update) {
 
         // The unwrap is likely to not fail, since the previous request is identical and succeded
         let joined = member_joined(member.unwrap());
-        if !joined {
-            info!("User not joined the channel after 10 seconds...");
-            let text = escape_markdown("You haven't joined the channel within 10 seconds :(", None);
-            let mut reply = SendMessage::new(sender_id, &text);
-            reply.set_parse_mode(&ParseMode::MarkdownV2);
-            let res = ctx.api.send_message(reply).await;
-            if res.is_err() {
-                let err = res.err().unwrap();
-                error!("[not join] {}", err);
-            }
-        } else {
+        if joined {
             info!("Refer OK!");
             let c = contests::get(&ctx, contest_id);
             if c.is_none() {
@@ -353,6 +343,16 @@ pub async fn callback(ctx: Context, update: Update) {
                         }
                     }
                 }
+            }
+        } else {
+            info!("User not joined the channel after 10 seconds...");
+            let text = escape_markdown("You haven't joined the channel within 10 seconds :(", None);
+            let mut reply = SendMessage::new(sender_id, &text);
+            reply.set_parse_mode(&ParseMode::MarkdownV2);
+            let res = ctx.api.send_message(reply).await;
+            if res.is_err() {
+                let err = res.err().unwrap();
+                error!("[not join] {}", err);
             }
         }
         delete_parent_message(&ctx, chat_id, parent_message).await;
@@ -506,7 +506,20 @@ pub async fn callback(ctx: Context, update: Update) {
 
             // Create rank
             let rank = contests::ranking(&ctx, &c);
-            if !rank.is_empty() {
+            if rank.is_empty() {
+                // No one partecipated in the challenge
+                let reply = SendMessage::new(
+                    sender_id,
+                    "No one partecipated to the challenge. Doing nothing.",
+                );
+                let res = ctx.api.send_message(reply).await;
+                if res.is_err() {
+                    let err = res.err().unwrap();
+                    error!("[stop send] {}", err);
+                }
+                display_manage_menu(&ctx, chat_id, &chan).await;
+                delete_parent_message(&ctx, chat_id, parent_message).await;
+            } else {
                 // Send top-10 to the channel and pin the message
                 let mut m = format!("\u{1f3c6} Contest ({}) finished \u{1f3c6}\n\n\n", c.name);
                 let winner = rank[0].user.clone();
@@ -611,19 +624,6 @@ pub async fn callback(ctx: Context, update: Update) {
                         error!("[insert being_contacted_users] {}", err);
                     }
                 }
-            } else {
-                // No one partecipated in the challenge
-                let reply = SendMessage::new(
-                    sender_id,
-                    "No one partecipated to the challenge. Doing nothing.",
-                );
-                let res = ctx.api.send_message(reply).await;
-                if res.is_err() {
-                    let err = res.err().unwrap();
-                    error!("[stop send] {}", err);
-                }
-                display_manage_menu(&ctx, chat_id, &chan).await;
-                delete_parent_message(&ctx, chat_id, parent_message).await;
             }
         }
 
@@ -757,9 +757,10 @@ pub async fn callback(ctx: Context, update: Update) {
                                 Some(x) => format!("{}", x),
                                 None => "No".to_string(),
                             })
-                            .with_cell(match contest.stopped {
-                                true => "Yes".to_string(),
-                                false => "No".to_string(),
+                            .with_cell(if contest.stopped {
+                                "Yes".to_string()
+                            } else {
+                                "No".to_string()
                             })
                             .with_cell(users),
                     );
@@ -776,7 +777,14 @@ pub async fn callback(ctx: Context, update: Update) {
             text
         };
 
-        if !text.is_empty() {
+        if text.is_empty() {
+            remove_loading_icon(
+                &ctx,
+                &callback.id,
+                Some("You don't have any active or past contests for this group/channel!"),
+            )
+            .await;
+        } else {
             let mut reply = SendMessage::new(sender_id, &text);
             reply.set_parse_mode(&ParseMode::MarkdownV2);
 
@@ -790,13 +798,6 @@ pub async fn callback(ctx: Context, update: Update) {
 
             display_manage_menu(&ctx, chat_id, &chan).await;
             delete_parent_message(&ctx, chat_id, parent_message).await;
-        } else {
-            remove_loading_icon(
-                &ctx,
-                &callback.id,
-                Some("You don't have any active or past contests for this group/channel!"),
-            )
-            .await;
         }
     }
 

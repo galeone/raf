@@ -369,7 +369,9 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
         // as a channel. If instead is a start from inside the bot chat, we just say hello.
         let chat_id = message.chat.get_id();
         let registered = channels::try_register(&ctx, chat_id, sender_id).await;
-        if !registered {
+        if registered {
+            display_main_commands(&ctx, sender_id).await;
+        } else {
             ctx
                 .api
                 .send_message(SendMessage::new(
@@ -377,8 +379,6 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                     "Welcome to RaF (Refer a Friend) Bot! Have a look at the command list, with /help",
                 ))
                 .await?;
-        } else {
-            display_main_commands(&ctx, sender_id).await;
         }
     }
 

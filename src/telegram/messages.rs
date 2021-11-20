@@ -60,13 +60,12 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
         &escape_markdown(&format!("{}\n\nWhat do you want to do?", chan.name), None),
     );
     reply.set_parse_mode(&ParseMode::MarkdownV2);
-    let chan_id = chan.id;
     let inline_keyboard = vec![
         vec![
             InlineKeyboardButton {
                 text: "\u{270d}\u{fe0f} Create".to_owned(),
                 // start, chan
-                callback_data: Some(format!("create {}", chan_id)),
+                callback_data: Some(format!("create {}", chan.id)),
                 callback_game: None,
                 login_url: None,
                 pay: None,
@@ -76,7 +75,7 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
             },
             InlineKeyboardButton {
                 text: "\u{274c} Delete".to_owned(),
-                callback_data: Some(format!("delete {}", chan_id)),
+                callback_data: Some(format!("delete {}", chan.id)),
                 callback_game: None,
                 login_url: None,
                 pay: None,
@@ -89,7 +88,7 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
             InlineKeyboardButton {
                 text: "\u{25b6}\u{fe0f} Start".to_owned(),
                 // start, chan
-                callback_data: Some(format!("start {}", chan_id)),
+                callback_data: Some(format!("start {}", chan.id)),
                 callback_game: None,
                 login_url: None,
                 pay: None,
@@ -99,7 +98,7 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
             },
             InlineKeyboardButton {
                 text: "\u{23f9} Stop".to_owned(),
-                callback_data: Some(format!("stop {}", chan_id)),
+                callback_data: Some(format!("stop {}", chan.id)),
                 callback_game: None,
                 login_url: None,
                 pay: None,
@@ -111,7 +110,7 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
         vec![
             InlineKeyboardButton {
                 text: "\u{1f4c4}List".to_owned(),
-                callback_data: Some(format!("list {}", chan_id)),
+                callback_data: Some(format!("list {}", chan.id)),
                 callback_game: None,
                 login_url: None,
                 pay: None,
@@ -121,7 +120,7 @@ pub async fn display_manage_menu(ctx: &Context, chat_id: i64, chan: &Channel) {
             },
             InlineKeyboardButton {
                 text: "\u{1f519}Menu".to_owned(),
-                callback_data: Some(format!("main {}", chan_id)),
+                callback_data: Some(format!("main {}", chan.id)),
                 callback_game: None,
                 login_url: None,
                 pay: None,
