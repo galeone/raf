@@ -27,7 +27,13 @@ For the development version:
 cargo install --path .
 ```
 
-The stable version is not (yet) ready, especially because we depend on the fork that isn't published on crates.io but it's only a git repository.
+<!-- The stable version is not (yet) ready, especially because we depend on the fork that isn't published on crates.io but it's only a git repository. -->
+
+For the production version:
+
+```bash
+cargo install telegram-raf
+```
 
 2. Create the run path and the environment file
 

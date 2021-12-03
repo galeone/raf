@@ -16,15 +16,21 @@ use data_encoding::BASE64URL;
 use log::{error, info};
 use rusqlite::params;
 use std::collections::HashMap;
-use telexide::framework::{CommandError, CommandResult};
-use telexide::model::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyMarkup};
-use telexide::{api::types::SendMessage, prelude::*};
 
-use crate::persistence::types::{Channel, DBKey, NameKey, RankContest};
-use crate::telegram::{
-    channels, contests,
-    messages::{display_main_commands, escape_markdown},
-    users,
+use telexide_fork::{
+    api::types::SendMessage,
+    framework::{CommandError, CommandResult},
+    model::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyMarkup},
+    prelude::*,
+};
+
+use crate::{
+    persistence::types::{Channel, DBKey, NameKey, RankContest},
+    telegram::{
+        channels, contests,
+        messages::{display_main_commands, escape_markdown},
+        users,
+    },
 };
 
 /// Rank command. Shows to the user his/her rank for every joined challenge.

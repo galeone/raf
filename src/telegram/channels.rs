@@ -14,7 +14,7 @@
 
 use log::{error, info};
 use rusqlite::params;
-use telexide::{
+use telexide_fork::{
     api::types::{CreateChatInviteLink, GetChat, GetChatAdministrators, SendMessage},
     model::{AdministratorMemberStatus, Chat, ChatMember},
     prelude::*,

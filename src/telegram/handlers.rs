@@ -17,11 +17,11 @@ use data_encoding::BASE64URL;
 use log::{error, info};
 use rusqlite::params;
 use tabular::{Row, Table};
-use telexide::model::{
+use telexide_fork::model::{
     Chat, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyMarkup,
     UpdateContent,
 };
-use telexide::{
+use telexide_fork::{
     api::types::{AnswerCallbackQuery, GetChatMember, PinChatMessage, SendMessage},
     prelude::*,
 };

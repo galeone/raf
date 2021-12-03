@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use log::error;
-use telexide::{
+use telexide_fork::{
     api::types::{AnswerCallbackQuery, DeleteMessage, SendMessage},
     model::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyMarkup},
     prelude::*,

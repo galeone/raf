@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::env;
-use telexide::{api::types::*, prelude::*};
+use telexide_fork::{api::types::*, prelude::*};
 
 use log::{error, LevelFilter};
 use simple_logger::SimpleLogger;
 
 use tokio::time::{sleep, Duration};
 
-use raf::persistence::db::connection;
-use raf::persistence::types::*;
+use telegram_raf::persistence::db::connection;
+use telegram_raf::persistence::types::*;
 
-use raf::telegram::commands::*;
-use raf::telegram::handlers;
+use telegram_raf::telegram::commands::*;
+use telegram_raf::telegram::handlers;
 
 #[tokio::main]
 async fn main() {

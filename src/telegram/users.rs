@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use rusqlite::params;
-use telexide::prelude::*;
+use telexide_fork::prelude::*;
 
 use crate::persistence::types::{DBKey, User};
 

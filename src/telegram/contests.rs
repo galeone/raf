@@ -15,7 +15,7 @@
 use chrono::{DateTime, Utc};
 use log::error;
 use rusqlite::params;
-use telexide::{api::types::GetChatMember, prelude::*};
+use telexide_fork::{api::types::GetChatMember, prelude::*};
 
 use crate::persistence::types::{Contest, DBKey, Rank};
 use crate::telegram::users;
