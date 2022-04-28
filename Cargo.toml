@@ -15,22 +15,22 @@ categories = ["command-line-utilities"]
 chrono = "0.4.19"
 data-encoding = "2.3.2"
 default = "0.1.2"
-hyper = "0.14.15"
+hyper = "0.14.18"
 hyper-tls = "0.5.0"
-log = "0.4.14"
+log = "0.4.16"
 r2d2 = "0.8.9"
-r2d2_sqlite = "0.19.0"
-regex = "1.5.4"
-simple_logger = "1.15.0"
-tabular = "0.1.4"
+r2d2_sqlite = "0.20.0"
+regex = "1.5.5"
+simple_logger = "2.1.0"
+tabular = "0.2.0"
 typemap = "0.3.3"
 url = "2.2.2"
 telexide-fork = "0.2.1"
 
 [dependencies.rusqlite]
 features = ["chrono"]
-version = "0.26.1"
+version = "0.27.0"
 
 [dependencies.tokio]
 features = ["full"]
-version = "1.14.0"
+version = "1.18.0"
