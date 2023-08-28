@@ -73,14 +73,14 @@ pub struct Invite {
 pub struct Contest {
     /// Contest unique ID, locally generated
     pub id: i64,
-    /// Contest name, unique and locallyu generated
+    /// Contest name, unique and locally generated
     pub name: String,
     /// The prize the owner of the `chan` wants to give to the contest's winner
     pub prize: String,
     /// Contest end date and time. Invitations received after the end date
     /// won't generate an increase in the ranking.
     pub end: DateTime<Utc>,
-    /// Whenever the contenst's owner decided to start the Contest
+    /// Whenever the contest's owner decided to start the Contest
     pub started_at: Option<DateTime<Utc>>,
     /// True if the user decided to stop this contest.
     pub stopped: bool,
@@ -88,7 +88,7 @@ pub struct Contest {
     pub chan: i64,
 }
 
-/// Helper struct contaning a rank ID and a Contest
+/// Helper struct containing a rank ID and a Contest
 #[derive(Debug)]
 pub struct RankContest {
     /// A user rank (position)
@@ -108,14 +108,14 @@ pub struct Rank {
     pub user: User,
 }
 
-/// Unique type for a `typemap::Key` used to fetch from the telexde context
+/// Unique type for a `typemap::Key` used to fetch from the Telexide context
 /// the `r2d2::Pool<SqliteConnectionManager>`
 pub struct DBKey;
 impl Key for DBKey {
     type Value = r2d2::Pool<SqliteConnectionManager>;
 }
 
-/// Uniqye type for a `typemap::Key` used to fetch from the telexide context
+/// Unique type for a `typemap::Key` used to fetch from the Telexide context
 /// the bot name, without accessing in this way to the `env`.
 pub struct NameKey;
 impl Key for NameKey {

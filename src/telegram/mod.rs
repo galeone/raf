@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `RaF` telegram communcation.
+//! `RaF` telegram communication.
 //!
 //! This create is based upon a [fork (galeone/telexide) ](https://github.com/galeone/telexide/) of [telexide](https://github.com/CalliEve/telexide).
 //! The fork made it possible to use the library, since it was not maintained anymore and it was
@@ -25,9 +25,9 @@
 //!
 //! - `channels`: functions for working with channels, like registering the channels to `RaF` or
 //! getting the channels info. Despite the name, also groups and supergroups are supported, even
-//! though they are alwasy considered channels. Under the hood, there's almost zero differences
+//! though they are always considered channels. Under the hood, there's almost zero differences
 //! from the `RaF` goal.
-//! - `commands`: the comands available to the `RaF` users, like `/start`, `/rank`, `/contest`. See
+//! - `commands`: the commands available to the `RaF` users, like `/start`, `/rank`, `/contest`. See
 //! `/help` for the complete list of commands.
 //! - `contests`: function for creating and updating the contests. The complete contest workflow is
 //! not here, but in the `handlers` crate - because of how Telegram (and Telexide) works.

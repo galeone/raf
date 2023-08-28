@@ -95,7 +95,7 @@ pub async fn delete_message(ctx: &Context, chat_id: i64, message_id: i64) {
     }
 }
 
-/// Display the manage manu (grid of buttons), to use when the user is
+/// Display the manage menu (grid of buttons), to use when the user is
 /// creating/managing contests.
 ///
 /// # Arguments

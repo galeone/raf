@@ -218,7 +218,7 @@ pub fn from_text(text: &str, chan: i64) -> Result<Contest, Error> {
     })
 }
 
-/// Count the users that partecipated to the `contest`
+/// Count the users that participated to the `contest`
 ///
 /// # Arguments
 ///
@@ -256,7 +256,7 @@ pub fn count_users(ctx: &Context, contest: &Contest) -> i64 {
 /// function to check if the user is still inside the channel referenced by the `contest`.
 ///
 /// # Arguments
-/// * `ctx`: The telexide ctx, used to get the db
+/// * `ctx`: The Telexide context, used to get the db
 /// * `contest`: The Contest under examination
 ///
 /// # Panics

@@ -14,8 +14,8 @@
 
 use r2d2_sqlite::SqliteConnectionManager;
 
-/// Database schema definition. Transaction executed everytime a new connection
-/// pool is requrested (usually, once at the application startup).
+/// Database schema definition. Transaction executed every time a new connection
+/// pool is requested (usually, once at the application startup).
 ///
 /// `being_managed_channels`, as the name suggests, is the channel that the owner (
 /// hence `channels.registered_by` == owner) is managing.
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS being_contacted_users(
 );
 COMMIT;";
 
-/// Creates a connection pool to the `SQLite` database, whose name is alwasy
+/// Creates a connection pool to the `SQLite` database, whose name is always
 /// "raf.db" and it's always in the current working directory of the application.
 ///
 /// Foreign keys are enabled in the `SQLite` instance.
