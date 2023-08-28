@@ -57,7 +57,7 @@ pub async fn callback(ctx: Context, update: Update) {
     let chat_id = callback.message.clone().unwrap().chat.get_id();
     let sender_id = callback.from.id;
 
-    let data = callback.data.clone().unwrap_or_else(|| "".to_string());
+    let data = callback.data.clone().unwrap_or_else(String::new);
     let mut source: i64 = 0;
     let mut dest: i64 = 0;
     let chan_id: i64;
@@ -255,7 +255,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 }
             }
             Err(err) => {
-                let text = escape_markdown(&format!("{}", err), None);
+                let text = escape_markdown(&format!("{err}"), None);
                 let mut reply = SendMessage::new(sender_id, &text);
                 reply.set_parse_mode(&ParseMode::MarkdownV2);
                 let res = ctx.api.send_message(reply).await;
@@ -563,21 +563,21 @@ pub async fn callback(ctx: Context, update: Update) {
                     if rank == 1 {
                         m += "\u{1f947}#1!";
                     } else if rank <= 3 {
-                        m += &format!("\u{1f3c6} #{}", rank);
+                        m += &format!("\u{1f3c6} #{rank}");
                     } else {
-                        m += &format!("#{}", rank);
+                        m += &format!("#{rank}");
                     }
 
                     m += &format!(
                         " {}{}{} - {}\n",
                         user.first_name,
                         match user.last_name {
-                            Some(last_name) => format!(" {}", last_name),
-                            None => "".to_string(),
+                            Some(last_name) => format!(" {last_name}"),
+                            None => String::new(),
                         },
                         match user.username {
-                            Some(username) => format!(" ({})", username),
-                            None => "".to_string(),
+                            Some(username) => format!(" ({username})"),
+                            None => String::new(),
                         },
                         invites
                     );
@@ -621,8 +621,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 let text = if direct_communication {
                     let username = winner.username.unwrap();
                     format!(
-                        "The winner usename is @{}. Get in touch and send the prize!",
-                        username
+                        "The winner usename is @{username}. Get in touch and send the prize!"
                     )
                 } else {
                     "The winner has no username. It means you can communicate only through the bot.\n\n\
@@ -766,7 +765,7 @@ pub async fn callback(ctx: Context, update: Update) {
     if list {
         let text = {
             let contests = contests::get_all(&ctx, chan.id);
-            let mut text: String = "".to_string();
+            let mut text: String = String::new();
             if !contests.is_empty() {
                 text += "```\n";
                 let mut table = Table::new("{:<} | {:<} | {:<} | {:<} | {:<} | {:<}");
@@ -787,7 +786,7 @@ pub async fn callback(ctx: Context, update: Update) {
                             .with_cell(contest.end)
                             .with_cell(&contest.prize)
                             .with_cell(match contest.started_at {
-                                Some(x) => format!("{}", x),
+                                Some(x) => format!("{x}"),
                                 None => "No".to_string(),
                             })
                             .with_cell(if contest.stopped {
@@ -845,7 +844,7 @@ pub async fn callback(ctx: Context, update: Update) {
         let text = if res.is_err() {
             let err = res.unwrap_err();
             error!("[delete from contests] {}", err);
-            format!("Error: {}. You can't stop a contest with already some partecipant, this is unfair!", err)
+            format!("Error: {err}. You can't stop a contest with already some partecipant, this is unfair!")
         } else {
             "Done!".to_string()
         };
@@ -914,7 +913,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 error!("[send message] {}", err);
             }
 
-            if !c.is_err() {
+            if c.is_ok() {
                 let c = c.unwrap();
                 // Send message in the channel, indicating the contest name
                 // the end date, the prize, and pin it on top until the end date comes
@@ -958,9 +957,7 @@ pub async fn callback(ctx: Context, update: Update) {
                     ),
                     bot_link = escape_markdown(
                         &format!(
-                            "https://t.me/{bot_name}?start={params}",
-                            bot_name = bot_name,
-                            params = params
+                            "https://t.me/{bot_name}?start={params}"
                         ),
                         None
                     ),
@@ -1070,7 +1067,7 @@ pub async fn message(ctx: Context, update: Update) {
                     .clone()
                     .replace('@', "")
             };
-            if text.starts_with(&format!("/start@{}", bot_name)) && is_owner {
+            if text.starts_with(&format!("/start@{bot_name}")) && is_owner {
                 let res = start(ctx, message.clone()).await;
                 if res.is_err() {
                     error!("[inner start] {:?}", res.unwrap_err());
@@ -1078,9 +1075,9 @@ pub async fn message(ctx: Context, update: Update) {
             } else {
                 let commands = vec!["help", "register", "contest", "list", "rank"];
                 for command in commands {
-                    if text.starts_with(&format!("/{}@{}", command, bot_name)) {
+                    if text.starts_with(&format!("/{command}@{bot_name}")) {
                         let chat_id = message.chat.get_id();
-                        let text =  format!("All the commands, except for /start are disabled in groups. /start is enabled only for the group owner.\n\nTo use them, start @{}", bot_name);
+                        let text =  format!("All the commands, except for /start are disabled in groups. /start is enabled only for the group owner.\n\nTo use them, start @{bot_name}");
                         let res = ctx.api.send_message(SendMessage::new(chat_id, &text)).await;
 
                         if res.is_err() {
@@ -1164,7 +1161,7 @@ pub async fn message(ctx: Context, update: Update) {
                     let text = if res.is_err() {
                         let err = res.err().unwrap();
                         error!("[insert contest] {}", err);
-                        format!("Error: {}", err)
+                        format!("Error: {err}")
                     } else {
                         format!("Contest {} created succesfully!", contest.name)
                     };
@@ -1185,9 +1182,8 @@ pub async fn message(ctx: Context, update: Update) {
                             sender_id,
                             &format!(
                                 "Something wrong happened while creating your new contest.\n\n\
-                            Error: {}\n\n\
-                            Please restart the contest creating process and send a correct message",
-                                err
+                            Error: {err}\n\n\
+                            Please restart the contest creating process and send a correct message"
                             ),
                         ))
                         .await;

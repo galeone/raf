@@ -156,8 +156,8 @@ impl std::fmt::Display for Error {
     /// Format all the possible errors
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Error::ParseError(error) => write!(f, "DateTime parse {}", error),
-            Error::GenericError(error) => write!(f, "{}", error),
+            Error::ParseError(error) => write!(f, "DateTime parse {error}"),
+            Error::GenericError(error) => write!(f, "{error}"),
         }
     }
 }

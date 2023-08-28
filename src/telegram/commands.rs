@@ -85,9 +85,9 @@ pub async fn rank(ctx: Context, message: Message) -> CommandResult {
             if rank == 1 {
                 m += "\u{1f947}#1!";
             } else if rank <= 3 {
-                m += &format!("\u{1f3c6} #{}", rank);
+                m += &format!("\u{1f3c6} #{rank}");
             } else {
-                m += &format!("#{}", rank);
+                m += &format!("#{rank}");
             }
             m += "\n";
         }
@@ -244,7 +244,7 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
         ctx.api
             .send_message(SendMessage::new(
                 sender_id,
-                &format!("[insert user] {}", err),
+                &format!("[insert user] {err}"),
             ))
             .await?;
     }
@@ -329,12 +329,12 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                         "{}{}{} invited you to join {}",
                         user.first_name,
                         match user.last_name {
-                            Some(last_name) => format!(" {}", last_name),
-                            None => "".to_string(),
+                            Some(last_name) => format!(" {last_name}"),
+                            None => String::new(),
                         },
                         match user.username {
-                            Some(username) => format!(" (@{})", username),
-                            None => "".to_string(),
+                            Some(username) => format!(" (@{username})"),
+                            None => String::new(),
                         },
                         channel.name
                     ),
@@ -399,9 +399,7 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                 .as_bytes(),
             );
             let invite_link = format!(
-                "https://t.me/{bot_name}?start={params}",
-                bot_name = bot_name,
-                params = params
+                "https://t.me/{bot_name}?start={params}"
             );
 
             let text = &escape_markdown(
@@ -487,7 +485,7 @@ pub async fn list(ctx: Context, message: Message) -> CommandResult {
     let text = {
         let channels = channels::get_all(&ctx, sender_id);
 
-        let mut text: String = "".to_owned();
+        let mut text: String = String::new();
         for (i, chan) in channels.iter().enumerate() {
             text += &format!(
                 "{} [{}]({})\n",

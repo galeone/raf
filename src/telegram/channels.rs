@@ -145,9 +145,9 @@ pub async fn try_register(ctx: &Context, chat_id: i64, registered_by: i64) -> bo
         if let Some(invite_link) = invite_link {
             invite_link.to_string()
         } else if let Some(username) = username {
-            format!("https://t.me/{}", username)
+            format!("https://t.me/{username}")
         } else {
-            "".to_owned()
+            String::new()
         }
     };
 
@@ -231,7 +231,7 @@ pub async fn try_register(ctx: &Context, chat_id: i64, registered_by: i64) -> bo
         .api
         .send_message(SendMessage::new(
             registered_by,
-            &format!("Channel/Group {} registered succesfully!", title),
+            &format!("Channel/Group {title} registered succesfully!"),
         ))
         .await;
 
