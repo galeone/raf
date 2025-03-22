@@ -59,6 +59,22 @@ sudo systemctl enable raf@$USER.service
 
 The `raf.db` (to backup or inspect) is in `$HOME/.raf/`.
 
+### Broadcast Feature
+
+The bot supports a broadcast feature that allows the bot owner to send messages to all users and channels. To use this feature:
+
+1. Create a `broadcast.md` file in the bot's run directory (`$HOME/.raf/`) with the message you want to broadcast. The message supports Markdown formatting.
+
+2. If the bot is currently running, stop it. It requires a separate instance. Now start the bot with the `--broadcast` flag:
+```bash
+raf --broadcast
+```
+
+3. Once the bot is running, use the `/broadcast` command to send the message from `broadcast.md` to all users and channels.
+4. You can restart the bot to make it work as usual.
+
+The `broadcast.md` file should be formatted using Markdown V2 syntax, as the bot will send the message with `ParseMode::MarkdownV2`.
+
 ## Contributing
 
 Any feedback is welcome. Feel free to open issues and create pull requests!

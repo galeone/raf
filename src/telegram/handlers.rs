@@ -620,9 +620,7 @@ pub async fn callback(ctx: Context, update: Update) {
                 let direct_communication = winner.username.is_some();
                 let text = if direct_communication {
                     let username = winner.username.unwrap();
-                    format!(
-                        "The winner usename is @{username}. Get in touch and send the prize!"
-                    )
+                    format!("The winner usename is @{username}. Get in touch and send the prize!")
                 } else {
                     "The winner has no username. It means you can communicate only through the bot.\n\n\
                 Write NOW a message that will be delivered to the winner (if you can, just send the prize!).\n\n
