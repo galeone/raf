@@ -75,7 +75,7 @@ pub async fn rank(ctx: Context, message: Message) -> CommandResult {
     };
 
     let text = if rank_per_user_contest.is_empty() {
-        "You haven't partecipated in any contest yet!".to_string()
+        "You haven't participated in any contest yet!".to_string()
     } else {
         let mut m = "Your rankings\n\n".to_string();
         for rank_contest in rank_per_user_contest {
@@ -242,10 +242,7 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
         let err = res.err().unwrap();
         error!("[insert user] {}", err);
         ctx.api
-            .send_message(SendMessage::new(
-                sender_id,
-                &format!("[insert user] {err}"),
-            ))
+            .send_message(SendMessage::new(sender_id, &format!("[insert user] {err}")))
             .await?;
     }
 
@@ -398,9 +395,7 @@ pub async fn start(ctx: Context, message: Message) -> CommandResult {
                 )
                 .as_bytes(),
             );
-            let invite_link = format!(
-                "https://t.me/{bot_name}?start={params}"
-            );
+            let invite_link = format!("https://t.me/{bot_name}?start={params}");
 
             let text = &escape_markdown(
                 &format!(
@@ -513,5 +508,59 @@ pub async fn list(ctx: Context, message: Message) -> CommandResult {
     display_main_commands(&ctx, sender_id).await;
 
     info!("list command exit");
+    Ok(())
+}
+
+/// Broadcast command. Available only for the bot owner when started with the broadcast flag.
+///
+/// # Arguments
+/// * `ctx` - Telexide context
+/// * `message` - Received message with the command inside
+#[command(description = "Broadcast a message to all users and channels")]
+pub async fn broadcast(ctx: Context, message: Message) -> CommandResult {
+    info!("broadcast command begin");
+    let everyone = {
+        let guard = ctx.data.read();
+        let map = guard.get::<DBKey>().expect("db");
+        let conn = map.get().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT users.id from users union select channels.id from channels")
+            .unwrap();
+
+        let mut iter = stmt
+            .query_map(params![], |row| Ok(row.get(0)?))
+            .unwrap()
+            .peekable();
+        if iter.peek().is_some() && iter.peek().unwrap().is_ok() {
+            iter.map(std::result::Result::unwrap).collect::<Vec<i64>>()
+        } else {
+            vec![]
+        }
+    };
+    info!("sending broadcast to {} users", everyone.len());
+
+    // read text from file
+    let text = std::fs::read_to_string("broadcast.md").unwrap();
+
+    for id in everyone {
+        info!("sending to {}", id);
+        let mut reply = SendMessage::new(id, &text);
+        reply.set_parse_mode(&ParseMode::MarkdownV2);
+        let res = ctx.api.send_message(reply).await;
+        if res.is_err() {
+            let err = res.err().unwrap();
+            error!("[broadcast to {}] {}", id, err);
+        }
+    }
+
+    let sender_id = message.from.clone().unwrap().id;
+    let mut reply = SendMessage::new(sender_id, &text);
+    reply.set_parse_mode(&ParseMode::MarkdownV2);
+    let res = ctx.api.send_message(reply).await;
+    if res.is_err() {
+        let err = res.err().unwrap();
+        error!("[broadcast] {}", err);
+    }
+    info!("broadcast command end");
     Ok(())
 }

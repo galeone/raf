@@ -37,15 +37,29 @@ async fn main() {
     let token = env::var("TOKEN").expect("Provide the token via TOKEN env var");
     let bot_name = env::var("BOT_NAME").expect("Provide the bot name via BOT_NAME env var");
 
-    let client = ClientBuilder::new()
-        .set_token(&token)
-        .set_framework(create_framework!(
-            &bot_name, help, start, register, contest, list, rank
-        ))
-        .set_allowed_updates(vec![UpdateType::CallbackQuery, UpdateType::Message])
-        .add_handler_func(handlers::message)
-        .add_handler_func(handlers::callback)
-        .build();
+    // Check for the --broadcast flag
+    let mut broadcast = false;
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 && args[1] == "--broadcast" {
+        broadcast = true;
+    }
+
+    let mut binding = ClientBuilder::new();
+    let mut client_builder = binding.set_token(&token);
+
+    if broadcast {
+        client_builder = client_builder.set_framework(create_framework!(&bot_name, broadcast))
+    } else {
+        client_builder = client_builder
+            .set_framework(create_framework!(
+                &bot_name, help, start, register, contest, list, rank
+            ))
+            .set_allowed_updates(vec![UpdateType::CallbackQuery, UpdateType::Message])
+            .add_handler_func(handlers::message)
+            .add_handler_func(handlers::callback);
+    }
+
+    let client = client_builder.build();
 
     {
         let mut data = client.data.write();
@@ -53,7 +67,7 @@ async fn main() {
         data.insert::<NameKey>(bot_name);
     }
 
-    loop {
+    if broadcast {
         let ret = client.start().await;
         match ret {
             Err(err) => {
@@ -62,7 +76,22 @@ async fn main() {
             }
             Ok(()) => {
                 error!("Exiting from main loop without an error, but this should never happen!");
-                break;
+            }
+        }
+    } else {
+        loop {
+            let ret = client.start().await;
+            match ret {
+                Err(err) => {
+                    error!("ApiResponse {}\nWaiting a minute and retrying...", err);
+                    sleep(Duration::from_secs(60)).await;
+                }
+                Ok(()) => {
+                    error!(
+                        "Exiting from main loop without an error, but this should never happen!"
+                    );
+                    break;
+                }
             }
         }
     }
