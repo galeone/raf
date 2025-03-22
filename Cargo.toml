@@ -1,6 +1,6 @@
 [package]
 name = "telegram-raf"
-version = "0.1.1"
+version = "0.1.2"
 description = "RaF (Refer a Friend): bot for creating referral-based contests for your Telegram channels, groups and supergroups"
 readme = "README.md"
 authors = ["Paolo Galeone <nessuno@nerdz.eu>"]

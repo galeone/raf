@@ -206,7 +206,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "telegram-raf"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "data-encoding",
@@ -1604,9 +1604,9 @@ dependencies = [
 
 [[package]]
 name = "telexide-fork"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687f791acbb3d16816721725ab03f20889ca03fc35a7729db7e59426efced1cb"
+checksum = "bd370a33958cdbbca5fe201936b7344002aa2c2bb7d423d15abfa62159eae824"
 dependencies = [
  "async-trait",
  "chrono",
