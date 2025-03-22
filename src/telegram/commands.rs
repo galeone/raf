@@ -557,10 +557,10 @@ pub async fn broadcast(ctx: Context, message: Message) -> CommandResult {
     let mut reply = SendMessage::new(sender_id, &text);
     reply.set_parse_mode(&ParseMode::MarkdownV2);
     let res = ctx.api.send_message(reply).await;
-        if res.is_err() {
-            let err = res.err().unwrap();
-            error!("[broadcast] {}", err);
-        }
+    if res.is_err() {
+        let err = res.err().unwrap();
+        error!("[broadcast] {}", err);
+    }
     info!("broadcast command end");
     Ok(())
 }
