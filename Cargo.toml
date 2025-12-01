@@ -1,6 +1,6 @@
 [package]
 name = "telegram-raf"
-version = "0.1.2"
+version = "0.1.3"
 description = "RaF (Refer a Friend): bot for creating referral-based contests for your Telegram channels, groups and supergroups"
 readme = "README.md"
 authors = ["Paolo Galeone <nessuno@nerdz.eu>"]
@@ -12,25 +12,25 @@ keywords = ["telegram", "bot", "referral"]
 categories = ["command-line-utilities"]
 
 [dependencies]
-chrono = "0.4.40"
-data-encoding = "2.8.0"
+chrono = "0.4.42"
+data-encoding = "2.9.0"
 default = "0.1.2"
-hyper = "1.6.0"
+hyper = "1.8.1"
 hyper-tls = "0.6.0"
-log = "0.4.26"
+log = "0.4.28"
 r2d2 = "0.8.10"
-r2d2_sqlite = "0.27.0"
-regex = "1.11.1"
-simple_logger = "5.0.0"
+r2d2_sqlite = "0.31.0"
+regex = "1.12.2"
+simple_logger = "5.1.0"
 tabular = "0.2.0"
 typemap = "0.3.3"
-url = "2.5.4"
-telexide-fork = "0.2.3"
+url = "2.5.7"
+telexide-fork = "0.2.5"
 
 [dependencies.rusqlite]
 features = ["chrono"]
-version = "0.34.0"
+version = "0.37.0"
 
 [dependencies.tokio]
 features = ["full"]
-version = "1.44.1"
+version = "1.48.0"
